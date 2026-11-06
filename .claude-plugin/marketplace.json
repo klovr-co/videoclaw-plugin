@@ -1,0 +1,11 @@
+{
+  "name": "videoclaw-tools",
+  "owner": { "name": "Maxine" },
+  "plugins": [
+    {
+      "name": "videoclaw",
+      "source": "./",
+      "description": "Drive the Videoclaw desktop app from Claude: sessions, long-running builds, renders."
+    }
+  ]
+}
