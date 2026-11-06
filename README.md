@@ -28,13 +28,67 @@ Or in one step on Claude Code 2.1.275 or later:
 Start a new session after you install it. You get the `videoclaw_*` tools and a
 `videoclaw` skill that teaches the agent the start-then-check flow for long builds.
 
-## Other MCP clients (Tag bots, Claude Desktop, Cursor, Codex)
+To update:
 
-Clone the repo, then point the client at the bundled server:
+    claude plugin update videoclaw@videoclaw-tools
 
-    { "mcpServers": { "videoclaw": { "command": "node", "args": ["/path/to/repo/dist/mcp.mjs"] } } }
+Then restart Claude Code.
 
-For a Tag bot, put that in a `.mcp.json` in the bot's folder.
+## Install (Claude Desktop)
+
+Claude Desktop does not use Claude Code plugins. Add the MCP server and the skill separately.
+
+1. Download the plugin. The repo includes the built server, so you don't need `npm install`:
+
+       git clone https://github.com/klovr-co/videoclaw-plugin ~/videoclaw-plugin
+
+2. Find the full path to Node. Claude Desktop does not use your Terminal's `PATH`, so a bare
+   `node` may not start:
+
+       which node        # for example /opt/homebrew/bin/node
+
+3. Open `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop →
+   Settings → Developer → Edit Config). Add `videoclaw` inside `mcpServers`. Keep any servers
+   that are already there. Use your Node path and your home folder:
+
+   ```json
+   {
+     "mcpServers": {
+       "videoclaw": {
+         "command": "/opt/homebrew/bin/node",
+         "args": ["/Users/YOU/videoclaw-plugin/dist/mcp.mjs"]
+       }
+     }
+   }
+   ```
+
+4. Quit Claude Desktop with Cmd+Q and open it again. It reads the config only at startup.
+   `videoclaw` then shows in the tools menu of a chat. Claude Desktop asks you to allow each
+   tool the first time it is used.
+
+5. Optional, but recommended: add the skill, so Claude starts long builds and checks back
+   instead of waiting on one call.
+
+       cd ~/videoclaw-plugin/skills && zip -r ~/Desktop/videoclaw-skill.zip videoclaw
+
+   Then in Claude Desktop: Settings → Capabilities → Skills → Upload, and pick
+   `videoclaw-skill.zip`.
+
+To update, pull the repo and restart Claude Desktop:
+
+    cd ~/videoclaw-plugin && git pull
+
+If the skill changed, zip and upload it again. Claude Desktop does not update either part by
+itself.
+
+## Other MCP clients (Tag bots, Cursor, Codex)
+
+Clone the repo as above, then point the client at the bundled server. Use the full path to
+Node if the client is an app rather than a terminal:
+
+    { "mcpServers": { "videoclaw": { "command": "/opt/homebrew/bin/node", "args": ["/path/to/videoclaw-plugin/dist/mcp.mjs"] } } }
+
+For a Tag bot, put that in a `.mcp.json` in the bot's folder. To update, `git pull` the repo.
 
 ## CLI
 
