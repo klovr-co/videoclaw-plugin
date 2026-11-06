@@ -89,6 +89,28 @@ async function withApp(fn, arg) {
   }
 }
 
+// Helpers available to functions run through `app()`: the bridge, the workspace
+// folder, the account-bound scope the app uses for plans/memory/voices, and an
+// unwrap for the app's `{ ok, value, message }` replies.
+const PRELUDE = `
+  const vc = window.videoclaw;
+  const workspace = async () => (await vc.bootstrapStatus())?.workspacePath ?? (await vc.listSessions())[0]?.cwd;
+  const appScope = async (extra) => {
+    const [settings, account] = await Promise.all([vc.getSettings(), vc.accountSnapshot()]);
+    if (!account?.storedKeyId) throw new Error("Videoclaw isn't signed in.");
+    return { ...extra, gatewayUrl: String(settings.gatewayUrl).replace(/\\/+$/, ""), canonicalKeyId: account.storedKeyId };
+  };
+  const unwrap = (reply) => {
+    if (reply && reply.ok === false) throw new Error(reply.message ?? "Videoclaw refused that.");
+    return reply && "value" in reply ? reply.value : reply;
+  };
+`;
+
+/** Run `fn(arg)` in the renderer with the PRELUDE helpers in scope. */
+export function app(fn, arg) {
+  return withApp({ toString: () => `(async (arg) => { ${PRELUDE}; return (${fn})(arg); })` }, arg);
+}
+
 // ── app lifecycle ──────────────────────────────────────────────────────────
 
 export async function isReachable() {
@@ -230,11 +252,11 @@ export function toTranscript(events) {
  * event) with the assistant's reply, any tools used, and any approval prompts
  * that appeared — approvals must be answered in the Videoclaw window.
  */
-export async function send(sessionId, text, { wait = true, timeoutMs = 15 * 60_000 } = {}) {
+export async function send(sessionId, text, { wait = true, timeoutMs = 15 * 60_000, attachmentIds = [] } = {}) {
   const cdp = await Cdp.connect();
   try {
     return await cdp.call(
-      async ({ sessionId, text, wait, timeoutMs, clientTurnId }) => {
+      async ({ sessionId, text, wait, timeoutMs, clientTurnId, attachmentIds }) => {
         const vc = window.videoclaw;
         const events = [];
         const asks = [];
@@ -249,7 +271,7 @@ export async function send(sessionId, text, { wait = true, timeoutMs = 15 * 60_0
           if (req?.sessionId === sessionId) asks.push(req);
         });
         try {
-          const receipt = await vc.sendMessage(sessionId, { text, attachmentIds: [], clientTurnId });
+          const receipt = await vc.sendMessage(sessionId, { text, attachmentIds, clientTurnId });
           if (!wait) return { receipt };
           const timer = new Promise((r) => setTimeout(() => r("timeout"), timeoutMs));
           const outcome = await Promise.race([finished, timer]);
@@ -259,7 +281,7 @@ export async function send(sessionId, text, { wait = true, timeoutMs = 15 * 60_0
           if (typeof offAsk === "function") offAsk();
         }
       },
-      { sessionId, text, wait, timeoutMs, clientTurnId: randomUUID() },
+      { sessionId, text, wait, timeoutMs, clientTurnId: randomUUID(), attachmentIds },
     );
   } finally {
     cdp.close();
@@ -298,6 +320,14 @@ export async function getJob(sessionId) {
   return {
     jobId: snap.jobId,
     jobPath: snap.jobPath,
+    versions: (snap.versions ?? []).map((v) => ({
+      version: v.n,
+      path: v.path,
+      approved: v.approved,
+      isFinal: (snap.finals ?? []).some((f) => f.path === v.path),
+      feedback: v.feedback ?? [],
+      created: new Date(v.createdAtMs).toISOString(),
+    })),
     renders: (snap.renders ?? []).map(file),
     assets: (snap.assets ?? []).map(file),
   };

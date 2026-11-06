@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import * as vc from "../src/videoclaw.mjs";
+import * as studio from "../src/studio.mjs";
 
 const HELP = `vc — drive Videoclaw chat sessions from the terminal
 
@@ -13,6 +14,13 @@ const HELP = `vc — drive Videoclaw chat sessions from the terminal
   vc history <sessionId> [--raw]
   vc job <sessionId> [--all]     the session's job folder: final renders (+ every output with --all)
   vc taste <clientId>            which taste layers the app applies for that project
+  vc plan <sessionId>            show the plan card
+  vc choose <sessionId> build|preview|dismiss|change ["correction"]
+  vc approve <sessionId> <version>   approve a version as final
+  vc share <sessionId> [version]     upload a finished version, print its link
+  vc shares [sessionId]          list share links
+  vc pending [sessionId]         questions, file requests and approvals waiting on you
+  vc spend [sessionId]           a video's spend and your credit balance
   vc interrupt <sessionId>
   vc rename <sessionId> <title>
 
@@ -123,6 +131,45 @@ try {
       print(await vc.getTaste(args[0]), (t) => {
         for (const l of t.layers) console.log(`${l.applied ? "✓" : "✗"} ${l.label.padEnd(13)} ${l.file}${l.applied ? `  (${l.cards.length} sections)` : "  (not found)"}`);
         if (t.pendingProposals.length) console.log(`\n${t.pendingProposals.length} taste proposals waiting for review in the app`);
+      });
+      break;
+    case "plan":
+      need(1, "vc plan <sessionId>");
+      print(await studio.getPlan(args[0]), (r) => {
+        if (!r.plan) return console.log(r.note);
+        console.log(`${r.plan.title}  [${r.plan.phase}]\n\n${r.plan.text}`);
+      });
+      break;
+    case "choose":
+      need(2, "vc choose <sessionId> build|preview|dismiss|change [correction]");
+      print(await studio.choosePlan(args[0], args[1], args.slice(2).join(" ") || undefined), () => console.log(`chose ${args[1]}.`));
+      break;
+    case "approve":
+      need(2, "vc approve <sessionId> <version>");
+      await studio.approveVersion(args[0], Number(args[1]));
+      console.log(`approved V${args[1]}.`);
+      break;
+    case "share":
+      need(1, "vc share <sessionId> [version]");
+      print(await studio.shareCreate(args[0], { version: args[1] ? Number(args[1]) : undefined }), (s) =>
+        console.log(`V${s.version}: ${s.url}  (expires ${s.expires})`),
+      );
+      break;
+    case "shares":
+      print(await studio.shareList(args[0]), (list) =>
+        list.forEach((s) => console.log(`${s.status.padEnd(8)} V${s.version}  ${s.title}  ${s.url}`)),
+      );
+      break;
+    case "pending":
+      print(await studio.pendingRequests(args[0]), (list) => {
+        if (!list.length) return console.log("nothing waiting.");
+        for (const r of list) console.log(`${r.requestId}  ${r.kind ?? r.channel}  ${r.title ?? r.toolName ?? ""}`);
+      });
+      break;
+    case "spend":
+      print(await studio.getSpend(args[0]), (s) => {
+        if (s.video) console.log(`this video: $${s.video.spentUsd} spent, $${s.video.reservedUsd} reserved`);
+        if (s.account) console.log(`credit available: $${s.account.availableUsd}`);
       });
       break;
     case "interrupt":

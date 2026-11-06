@@ -1,6 +1,6 @@
 {
   "name": "videoclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drive the Videoclaw desktop app from Claude: create video sessions, send briefs and replies, track long-running builds, and fetch renders.",
   "author": { "name": "Maxine" },
   "keywords": ["videoclaw", "video", "mcp"],

@@ -81,6 +81,22 @@ async function withApp(fn, arg) {
     cdp.close();
   }
 }
+var PRELUDE = `
+  const vc = window.videoclaw;
+  const workspace = async () => (await vc.bootstrapStatus())?.workspacePath ?? (await vc.listSessions())[0]?.cwd;
+  const appScope = async (extra) => {
+    const [settings, account] = await Promise.all([vc.getSettings(), vc.accountSnapshot()]);
+    if (!account?.storedKeyId) throw new Error("Videoclaw isn't signed in.");
+    return { ...extra, gatewayUrl: String(settings.gatewayUrl).replace(/\\/+$/, ""), canonicalKeyId: account.storedKeyId };
+  };
+  const unwrap = (reply) => {
+    if (reply && reply.ok === false) throw new Error(reply.message ?? "Videoclaw refused that.");
+    return reply && "value" in reply ? reply.value : reply;
+  };
+`;
+function app(fn, arg) {
+  return withApp({ toString: () => `(async (arg) => { ${PRELUDE}; return (${fn})(arg); })` }, arg);
+}
 async function isReachable() {
   try {
     await findPage();
@@ -185,26 +201,26 @@ function toTranscript(events) {
   }
   return out;
 }
-async function send(sessionId, text, { wait = true, timeoutMs = 15 * 6e4 } = {}) {
+async function send(sessionId, text, { wait = true, timeoutMs = 15 * 6e4, attachmentIds = [] } = {}) {
   const cdp = await Cdp.connect();
   try {
     return await cdp.call(
-      async ({ sessionId: sessionId2, text: text2, wait: wait2, timeoutMs: timeoutMs2, clientTurnId }) => {
-        const vc = window.videoclaw;
+      async ({ sessionId: sessionId2, text: text2, wait: wait2, timeoutMs: timeoutMs2, clientTurnId, attachmentIds: attachmentIds2 }) => {
+        const vc2 = window.videoclaw;
         const events = [];
         const asks = [];
         let done;
         const finished = new Promise((r) => done = r);
-        const offEvent = vc.onSessionEvent((payload) => {
+        const offEvent = vc2.onSessionEvent((payload) => {
           if (payload?.sessionId !== sessionId2) return;
           events.push(payload.event);
           if (payload.event?.kind === "result") done("result");
         });
-        const offAsk = vc.onPermissionRequest((req) => {
+        const offAsk = vc2.onPermissionRequest((req) => {
           if (req?.sessionId === sessionId2) asks.push(req);
         });
         try {
-          const receipt = await vc.sendMessage(sessionId2, { text: text2, attachmentIds: [], clientTurnId });
+          const receipt = await vc2.sendMessage(sessionId2, { text: text2, attachmentIds: attachmentIds2, clientTurnId });
           if (!wait2) return { receipt };
           const timer = new Promise((r) => setTimeout(() => r("timeout"), timeoutMs2));
           const outcome = await Promise.race([finished, timer]);
@@ -214,7 +230,7 @@ async function send(sessionId, text, { wait = true, timeoutMs = 15 * 6e4 } = {})
           if (typeof offAsk === "function") offAsk();
         }
       },
-      { sessionId, text, wait, timeoutMs, clientTurnId: randomUUID() }
+      { sessionId, text, wait, timeoutMs, clientTurnId: randomUUID(), attachmentIds }
     );
   } finally {
     cdp.close();
@@ -246,6 +262,14 @@ async function getJob(sessionId) {
   return {
     jobId: snap.jobId,
     jobPath: snap.jobPath,
+    versions: (snap.versions ?? []).map((v) => ({
+      version: v.n,
+      path: v.path,
+      approved: v.approved,
+      isFinal: (snap.finals ?? []).some((f) => f.path === v.path),
+      feedback: v.feedback ?? [],
+      created: new Date(v.createdAtMs).toISOString()
+    })),
     renders: (snap.renders ?? []).map(file),
     assets: (snap.assets ?? []).map(file)
   };
@@ -269,13 +293,13 @@ async function getTaste(clientId) {
 }
 function pendingApprovals(sessionId) {
   return withApp(async (sessionId2) => {
-    const vc = window.videoclaw;
+    const vc2 = window.videoclaw;
     const seen = [];
     const offs = [
-      vc.onPermissionRequest((r) => seen.push({ type: "permission", ...r })),
-      vc.onInputRequest?.((r) => seen.push({ type: "input", ...r }))
+      vc2.onPermissionRequest((r) => seen.push({ type: "permission", ...r })),
+      vc2.onInputRequest?.((r) => seen.push({ type: "input", ...r }))
     ];
-    await vc.replayPendingInteractions();
+    await vc2.replayPendingInteractions();
     await new Promise((r) => setTimeout(r, 400));
     for (const off of offs) if (typeof off === "function") off();
     const unique = new Map(seen.filter((r) => r.sessionId === sessionId2).map((r) => [r.requestId, r]));
@@ -317,6 +341,90 @@ async function checkProgress(sessionId, { waitMs = 4 * 6e4, pollMs = 5e3 } = {})
   };
 }
 
+// src/studio.mjs
+import { randomUUID as randomUUID2 } from "node:crypto";
+var publicShare = (s) => ({
+  shareId: s.shareId,
+  status: s.revokedAtMs ? "revoked" : s.expiresAtMs && s.expiresAtMs < Date.now() ? "expired" : "active",
+  url: s.url,
+  title: s.title,
+  version: s.versionN,
+  path: s.path,
+  sizeMb: s.sizeBytes ? +(s.sizeBytes / 1e6).toFixed(1) : void 0,
+  created: s.createdAtMs ? new Date(s.createdAtMs).toISOString() : void 0,
+  expires: s.expiresAtMs ? new Date(s.expiresAtMs).toISOString() : void 0
+});
+function getPlan(sessionId) {
+  return app(async (sessionId2) => {
+    const plan = unwrap(await vc.readSessionPlan(await appScope({ sessionId: sessionId2 })));
+    if (!plan) return { plan: null, note: "This session has no plan card." };
+    return { plan };
+  }, sessionId);
+}
+function choosePlan(sessionId, action, correction) {
+  return app(
+    async ({ sessionId: sessionId2, action: action2, correction: correction2, clientActionId }) => {
+      const scope = await appScope({ sessionId: sessionId2 });
+      const plan = unwrap(await vc.readSessionPlan(scope));
+      if (!plan) throw new Error("This session has no plan to choose.");
+      const reply = await vc.chooseSessionPlan(scope, {
+        planId: plan.id,
+        revision: plan.revision,
+        action: action2,
+        clientActionId,
+        ...action2 === "change" ? { correction: correction2 } : {}
+      });
+      return { chosen: action2, plan: unwrap(reply) };
+    },
+    { sessionId, action, correction, clientActionId: randomUUID2() }
+  );
+}
+function approveVersion(sessionId, version) {
+  return app(({ sessionId: sessionId2, version: version2 }) => vc.approveVersion(sessionId2, version2), { sessionId, version });
+}
+async function shareCreate(sessionId, { version, title } = {}) {
+  return publicShare(await app(
+    async ({ sessionId: sessionId2, version: version2, title: title2 }) => {
+      const job = await vc.getJobSnapshot(sessionId2);
+      const versions = job?.versions ?? [];
+      const pick = version2 !== void 0 ? versions.find((v) => v.n === version2) : job?.finals?.at(-1) ?? versions.at(-1);
+      if (!pick) throw new Error(version2 !== void 0 ? `This session has no V${version2}.` : "This session has no finished version to share yet.");
+      const session = (await vc.listSessions()).find((s) => s.sessionId === sessionId2);
+      await vc.shareCreate({ sessionId: sessionId2, path: pick.path, title: (title2 || session?.title || "Video").slice(0, 120) });
+      const shares = await vc.shareList(sessionId2);
+      const live = shares.filter((s) => s.path === pick.path && !s.revokedAtMs);
+      return live.sort((a, b) => b.createdAtMs - a.createdAtMs)[0] ?? { path: pick.path };
+    },
+    { sessionId, version, title }
+  ));
+}
+async function shareList(sessionId) {
+  return (await app((sessionId2) => vc.shareList(sessionId2 ?? void 0), sessionId ?? null)).map(publicShare);
+}
+function pendingRequests(sessionId) {
+  return app(async (sessionId2) => {
+    const seen = [];
+    const offs = [
+      vc.onPermissionRequest((r) => seen.push({ channel: "permission", ...r })),
+      vc.onInputRequest((r) => seen.push({ channel: "input", ...r }))
+    ];
+    await vc.replayPendingInteractions();
+    await new Promise((r) => setTimeout(r, 400));
+    for (const off of offs) if (typeof off === "function") off();
+    const unique = new Map(seen.filter((r) => !sessionId2 || r.sessionId === sessionId2).map((r) => [r.requestId, r]));
+    return [...unique.values()];
+  }, sessionId ?? null);
+}
+function getSpend(sessionId) {
+  return app(async (sessionId2) => {
+    const [spend, meter] = await Promise.all([
+      sessionId2 ? vc.getSpendSnapshot(sessionId2) : null,
+      vc.keyMeter().catch(() => null)
+    ]);
+    return { video: spend, account: meter };
+  }, sessionId ?? null);
+}
+
 // bin/vc.mjs
 var HELP = `vc \u2014 drive Videoclaw chat sessions from the terminal
 
@@ -329,6 +437,13 @@ var HELP = `vc \u2014 drive Videoclaw chat sessions from the terminal
   vc history <sessionId> [--raw]
   vc job <sessionId> [--all]     the session's job folder: final renders (+ every output with --all)
   vc taste <clientId>            which taste layers the app applies for that project
+  vc plan <sessionId>            show the plan card
+  vc choose <sessionId> build|preview|dismiss|change ["correction"]
+  vc approve <sessionId> <version>   approve a version as final
+  vc share <sessionId> [version]     upload a finished version, print its link
+  vc shares [sessionId]          list share links
+  vc pending [sessionId]         questions, file requests and approvals waiting on you
+  vc spend [sessionId]           a video's spend and your credit balance
   vc interrupt <sessionId>
   vc rename <sessionId> <title>
 
@@ -446,6 +561,49 @@ ${j.assets.length} other outputs (--all to list)`);
         for (const l of t.layers) console.log(`${l.applied ? "\u2713" : "\u2717"} ${l.label.padEnd(13)} ${l.file}${l.applied ? `  (${l.cards.length} sections)` : "  (not found)"}`);
         if (t.pendingProposals.length) console.log(`
 ${t.pendingProposals.length} taste proposals waiting for review in the app`);
+      });
+      break;
+    case "plan":
+      need(1, "vc plan <sessionId>");
+      print(await getPlan(args[0]), (r) => {
+        if (!r.plan) return console.log(r.note);
+        console.log(`${r.plan.title}  [${r.plan.phase}]
+
+${r.plan.text}`);
+      });
+      break;
+    case "choose":
+      need(2, "vc choose <sessionId> build|preview|dismiss|change [correction]");
+      print(await choosePlan(args[0], args[1], args.slice(2).join(" ") || void 0), () => console.log(`chose ${args[1]}.`));
+      break;
+    case "approve":
+      need(2, "vc approve <sessionId> <version>");
+      await approveVersion(args[0], Number(args[1]));
+      console.log(`approved V${args[1]}.`);
+      break;
+    case "share":
+      need(1, "vc share <sessionId> [version]");
+      print(
+        await shareCreate(args[0], { version: args[1] ? Number(args[1]) : void 0 }),
+        (s) => console.log(`V${s.version}: ${s.url}  (expires ${s.expires})`)
+      );
+      break;
+    case "shares":
+      print(
+        await shareList(args[0]),
+        (list) => list.forEach((s) => console.log(`${s.status.padEnd(8)} V${s.version}  ${s.title}  ${s.url}`))
+      );
+      break;
+    case "pending":
+      print(await pendingRequests(args[0]), (list) => {
+        if (!list.length) return console.log("nothing waiting.");
+        for (const r of list) console.log(`${r.requestId}  ${r.kind ?? r.channel}  ${r.title ?? r.toolName ?? ""}`);
+      });
+      break;
+    case "spend":
+      print(await getSpend(args[0]), (s) => {
+        if (s.video) console.log(`this video: $${s.video.spentUsd} spent, $${s.video.reservedUsd} reserved`);
+        if (s.account) console.log(`credit available: $${s.account.availableUsd}`);
       });
       break;
     case "interrupt":
