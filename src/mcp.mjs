@@ -6,7 +6,7 @@ import { z } from "zod";
 import * as vc from "./videoclaw.mjs";
 import * as studio from "./studio.mjs";
 
-const server = new McpServer({ name: "videoclaw", version: "0.3.0" });
+const server = new McpServer({ name: "videoclaw", version: "0.3.1" });
 
 const ok = (value) => ({ content: [{ type: "text", text: JSON.stringify(value ?? { done: true }, null, 2) }] });
 const tool = (name, description, schema, run) =>

@@ -1,25 +1,45 @@
 {
-  "name": "videoclaw-remote",
+  "name": "videoclaw-mcp",
   "version": "0.3.1",
-  "private": true,
-  "type": "module",
-  "description": "CLI + MCP server that drives Videoclaw chat sessions over the app's DevTools port",
-  "bin": {
-    "vc": "dist/vc.mjs",
-    "videoclaw-mcp": "dist/mcp.mjs"
+  "description": "Unofficial MCP server, CLI and Claude Code plugin for the Videoclaw desktop app: create video sessions, track long builds, approve versions, share renders.",
+  "keywords": [
+    "videoclaw",
+    "mcp",
+    "claude",
+    "claude-code",
+    "video"
+  ],
+  "homepage": "https://github.com/klovr-co/videoclaw-plugin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klovr-co/videoclaw-plugin.git"
   },
+  "bugs": "https://github.com/klovr-co/videoclaw-plugin/issues",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "videoclaw-mcp": "dist/mcp.mjs",
+    "vc": "dist/vc.mjs"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    ".claude-plugin/plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin"
+  ],
   "engines": {
     "node": ">=22"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0",
-    "zod": "^3.25.0"
   },
   "scripts": {
     "build": "esbuild src/mcp.mjs bin/vc.mjs --bundle --platform=node --format=esm --target=node22 --outdir=dist '--entry-names=[name]' --out-extension:.js=.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\""
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^3.25.0",
     "esbuild": "^0.25.0"
-  },
-  "license": "MIT"
+  }
 }

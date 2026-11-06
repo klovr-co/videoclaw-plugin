@@ -37,62 +37,70 @@ Then restart Claude Code.
 ## Install (Claude Desktop)
 
 Claude Desktop does not use Claude Code plugins. Add the MCP server and the skill separately.
+The server runs from npm with `npx`, so Claude Desktop gets the newest version each time it
+starts.
 
-1. Download the plugin. The repo includes the built server, so you don't need `npm install`:
+1. Find the folder that holds Node. Claude Desktop does not use your Terminal's `PATH`, so you
+   give it the path yourself:
 
-       git clone https://github.com/klovr-co/videoclaw-plugin ~/videoclaw-plugin
+       dirname "$(which node)"        # for example /opt/homebrew/bin
 
-2. Find the full path to Node. Claude Desktop does not use your Terminal's `PATH`, so a bare
-   `node` may not start:
-
-       which node        # for example /opt/homebrew/bin/node
-
-3. Open `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop →
+2. Open `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop →
    Settings → Developer → Edit Config). Add `videoclaw` inside `mcpServers`. Keep any servers
-   that are already there. Use your Node path and your home folder:
+   that are already there. Replace `/opt/homebrew/bin` with the folder from step 1, in both
+   places:
 
    ```json
    {
      "mcpServers": {
        "videoclaw": {
-         "command": "/opt/homebrew/bin/node",
-         "args": ["/Users/YOU/videoclaw-plugin/dist/mcp.mjs"]
+         "command": "/opt/homebrew/bin/npx",
+         "args": ["-y", "videoclaw-mcp@latest"],
+         "env": { "PATH": "/opt/homebrew/bin:/usr/bin:/bin" }
        }
      }
    }
    ```
 
-4. Quit Claude Desktop with Cmd+Q and open it again. It reads the config only at startup.
+   The `env` line is required. Without it the server stops with `env: node: No such file or
+   directory`.
+
+3. Quit Claude Desktop with Cmd+Q and open it again. It reads the config only at startup.
    `videoclaw` then shows in the tools menu of a chat. Claude Desktop asks you to allow each
    tool the first time it is used.
 
-5. Optional, but recommended: add the skill, so Claude starts long builds and checks back
-   instead of waiting on one call.
+4. Optional, but recommended: add the skill, so Claude starts long builds and checks back
+   instead of waiting on one call. Download
+   [`skills/videoclaw/SKILL.md`](skills/videoclaw/SKILL.md), put it in a folder named
+   `videoclaw`, and zip that folder:
 
-       cd ~/videoclaw-plugin/skills && zip -r ~/Desktop/videoclaw-skill.zip videoclaw
+       mkdir -p ~/Desktop/videoclaw && curl -fsSL -o ~/Desktop/videoclaw/SKILL.md \
+         https://raw.githubusercontent.com/klovr-co/videoclaw-plugin/main/skills/videoclaw/SKILL.md
+       cd ~/Desktop && zip -r videoclaw-skill.zip videoclaw
 
    Then in Claude Desktop: Settings → Capabilities → Skills → Upload, and pick
    `videoclaw-skill.zip`.
 
-To update, pull the repo and restart Claude Desktop:
-
-    cd ~/videoclaw-plugin && git pull
-
-If the skill changed, zip and upload it again. Claude Desktop does not update either part by
-itself.
+**Updates:** the server updates itself. Each time Claude Desktop starts, `npx` checks npm for
+the newest `videoclaw-mcp`. The skill does not update itself; download and upload it again when
+the release notes say it changed.
 
 ## Other MCP clients (Tag bots, Cursor, Codex)
 
-Clone the repo as above, then point the client at the bundled server. Use the full path to
-Node if the client is an app rather than a terminal:
+Use the same `npx` command, with the `env` line when the client is an app rather than a
+terminal:
 
-    { "mcpServers": { "videoclaw": { "command": "/opt/homebrew/bin/node", "args": ["/path/to/videoclaw-plugin/dist/mcp.mjs"] } } }
+    { "mcpServers": { "videoclaw": { "command": "/opt/homebrew/bin/npx", "args": ["-y", "videoclaw-mcp@latest"], "env": { "PATH": "/opt/homebrew/bin:/usr/bin:/bin" } } } }
 
-For a Tag bot, put that in a `.mcp.json` in the bot's folder. To update, `git pull` the repo.
+For a Tag bot, put that in a `.mcp.json` in the bot's folder.
+
+To pin a version instead of updating, replace `videoclaw-mcp@latest` with, for example,
+`videoclaw-mcp@0.3.1`. To run from a clone instead of npm, use
+`"command": "/opt/homebrew/bin/node", "args": ["/path/to/videoclaw-plugin/dist/mcp.mjs"]`.
 
 ## CLI
 
-    node dist/vc.mjs --help        # or: npm link, then `vc --help`
+    npx -y --package=videoclaw-mcp vc --help     # or: npm i -g videoclaw-mcp, then `vc --help`
     vc new --client hover "make a 30s video about ..."
     vc status <sessionId> --wait 3
     vc job <sessionId>
@@ -122,6 +130,9 @@ Set `VIDEOCLAW_AUTO_LAUNCH=0` to turn this off.
 
     npm install
     npm run build     # rebuilds dist/ from src/ and bin/; commit dist/
+
+To release: bump the version in `package.json` and `.claude-plugin/plugin.json`, build, commit,
+push, then `npm publish`.
 
 ## License
 

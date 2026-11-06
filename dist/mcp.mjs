@@ -22241,7 +22241,7 @@ function startTemplate(clientId2, starterId) {
 }
 
 // src/mcp.mjs
-var server = new McpServer({ name: "videoclaw", version: "0.3.0" });
+var server = new McpServer({ name: "videoclaw", version: "0.3.1" });
 var ok = (value) => ({ content: [{ type: "text", text: JSON.stringify(value ?? { done: true }, null, 2) }] });
 var tool = (name, description, schema, run) => server.tool(name, description, schema, async (args) => {
   try {
