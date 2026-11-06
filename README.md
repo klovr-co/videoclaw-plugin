@@ -1,5 +1,9 @@
 # videoclaw
 
+> **Unofficial.** This plugin is not made or supported by Videoclaw. It calls the Videoclaw
+> desktop app's internal functions, which are not a public API, so a Videoclaw update can break
+> it until this plugin is updated.
+
 A Claude Code plugin, MCP server and CLI for the Videoclaw desktop app. It creates video
 sessions, sends briefs and replies, tracks long-running builds and fetches renders.
 
@@ -64,3 +68,7 @@ Set `VIDEOCLAW_AUTO_LAUNCH=0` to turn this off.
 
     npm install
     npm run build     # rebuilds dist/ from src/ and bin/; commit dist/
+
+## License
+
+MIT. See [LICENSE](LICENSE).

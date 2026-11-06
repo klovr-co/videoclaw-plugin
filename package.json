@@ -1,6 +1,6 @@
 {
   "name": "videoclaw-remote",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "CLI + MCP server that drives Videoclaw chat sessions over the app's DevTools port",
@@ -20,5 +20,6 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
-  }
+  },
+  "license": "MIT"
 }

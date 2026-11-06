@@ -1,13 +1,24 @@
 {
   "name": "videoclaw",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Drive the Videoclaw desktop app from Claude: create video sessions, send briefs and replies, track long-running builds, and fetch renders.",
-  "author": { "name": "Maxine" },
-  "keywords": ["videoclaw", "video", "mcp"],
+  "author": {
+    "name": "Maxine"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/klovr-co/videoclaw-plugin",
+  "repository": "https://github.com/klovr-co/videoclaw-plugin",
+  "keywords": [
+    "videoclaw",
+    "video",
+    "mcp"
+  ],
   "mcpServers": {
     "videoclaw": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.mjs"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/mcp.mjs"
+      ]
     }
   }
 }
