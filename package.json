@@ -35,7 +35,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "esbuild src/mcp.mjs bin/vc.mjs --bundle --platform=node --format=esm --target=node22 --outdir=dist '--entry-names=[name]' --out-extension:.js=.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\""
+    "build": "esbuild src/mcp.mjs bin/vc.mjs --bundle --platform=node --format=esm --target=node22 --outdir=dist '--entry-names=[name]' --out-extension:.js=.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
+    "build:mcpb": "node scripts/build-mcpb.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.20.0",

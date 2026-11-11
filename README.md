@@ -42,9 +42,21 @@ Then restart Claude Code.
 
 ## Install (Claude Desktop)
 
+### One-file install (easiest)
+
+1. Download `videoclaw-<version>.mcpb` from the
+   [latest release](https://github.com/klovr-co/videoclaw-plugin/releases/latest).
+2. Double-click it. Claude Desktop opens and asks to install the extension. Click **Install**.
+3. Optional: add the skill (step 4 below).
+
+This runs on the Node that ships with Claude Desktop, so you don't need Node, npm or any
+config. It does not update itself: install the new `.mcpb` when a release comes out.
+
+### With npx (updates itself)
+
 Claude Desktop does not use Claude Code plugins. Add the MCP server and the skill separately.
 The server runs from npm with `npx`, so Claude Desktop gets the newest version each time it
-starts.
+starts. You need Node 22 or newer (`node --version`).
 
 1. Find the folder that holds Node. Claude Desktop does not use your Terminal's `PATH`, so you
    give it the path yourself:
@@ -154,7 +166,8 @@ Rewritten for Videoclaw 0.2.
     npm run build     # rebuilds dist/ from src/ and bin/; commit dist/
 
 To release: bump the version in `package.json` and `.claude-plugin/plugin.json`, build, commit,
-push, then `npm publish`.
+push, then `npm publish` (approve the staged version with your security key) and
+`npm run build:mcpb`, and attach `release/videoclaw-<version>.mcpb` to a GitHub release.
 
 ## License
 
