@@ -7,14 +7,20 @@
 A Claude Code plugin, MCP server and CLI for the Videoclaw desktop app. It creates video
 sessions, sends briefs and replies, tracks long-running builds and fetches renders.
 
-It drives the Videoclaw app on the same Mac through the app's DevTools port. It calls the
-same functions the app's own UI uses, so auth, billing, budgets, taste and approvals all
-stay inside Videoclaw.
+It drives the Videoclaw app on the same Mac. It reads the address of the app's local server
+through the app's DevTools port, then calls the same server methods the app's own window
+calls, so auth, billing, budgets, taste and approvals all stay inside Videoclaw.
+
+Videoclaw calls a client a **project** and a chat session a **video**. The tools keep the
+names `clientId` (a project's id or name, such as `Hover`) and `sessionId` (a video's id).
 
 ## Requirements (on each Mac)
 
-- macOS, with Videoclaw installed in /Applications and signed in
+- macOS, with Videoclaw 0.2 or newer installed in /Applications and signed in
 - Node 22 or newer
+
+Videoclaw 0.2 rebuilt the app's internals. Plugin 0.4 works with Videoclaw 0.2 and newer; for
+Videoclaw 0.1, use plugin 0.3.1.
 
 ## Install (Claude Code)
 
@@ -95,36 +101,52 @@ terminal:
 For a Tag bot, put that in a `.mcp.json` in the bot's folder.
 
 To pin a version instead of updating, replace `videoclaw-mcp@latest` with, for example,
-`videoclaw-mcp@0.3.1`. To run from a clone instead of npm, use
+`videoclaw-mcp@0.4.0`. To run from a clone instead of npm, use
 `"command": "/opt/homebrew/bin/node", "args": ["/path/to/videoclaw-plugin/dist/mcp.mjs"]`.
 
 ## CLI
 
     npx -y --package=videoclaw-mcp vc --help     # or: npm i -g videoclaw-mcp, then `vc --help`
-    vc new --client hover "make a 30s video about ..."
+    vc new --client Hover "make a 30s video about ..." --file ~/footage/clip.mp4
     vc status <sessionId> --wait 3
     vc job <sessionId>
+    vc share <sessionId>
 
 ## How it stays connected
 
 Videoclaw has to run with `--remote-debugging-port` (default 9339, override with
-`VIDEOCLAW_CDP_PORT`). Every command checks the port first:
+`VIDEOCLAW_CDP_PORT`). The plugin uses the port only to read the address and secret of the
+app's local server. Every command checks the port first:
 
 - Videoclaw closed → it starts Videoclaw with the port.
 - Videoclaw open without the port (after an update or a Dock launch) and idle → it restarts
   Videoclaw with the port.
 - Videoclaw open without the port and a job running → it refuses, so the job isn't
-  interrupted.
+  interrupted. It reads the app's database (read-only) to tell.
 
 Set `VIDEOCLAW_AUTO_LAUNCH=0` to turn this off.
 
 ## Notes
 
-- Spend approvals are never answered from here. They show in the Videoclaw window.
+- Spend and permission approvals are never answered from here. They show in the Videoclaw
+  window.
 - While the port is open, any local process can control Videoclaw. It only listens on
   127.0.0.1.
-- This uses Videoclaw's internal functions (`createSession`, `sendMessage`, `getHistory`,
-  ...). A Videoclaw update could rename them.
+- This uses Videoclaw's internal server methods (`createVideo`, `send`, `watchVideo`, ...).
+  A Videoclaw update could rename them.
+
+## Changes in 0.4.0
+
+Rewritten for Videoclaw 0.2.
+
+- Projects and videos have new ids. `clientId` also accepts a project's name.
+- Files you attach are listed in the message, the same way the app's composer does it.
+- A message sent while Videoclaw is working is queued, and sent when the turn ends.
+- New tools: `videoclaw_rename_session`, `videoclaw_set_agent_settings`.
+- Removed, because Videoclaw 0.2 has no methods for them: plan cards (use
+  `videoclaw_set_agent_settings` with mode `plan`; plans now come as questions), revert and
+  reopen, project memory, the media library, templates, voices, and creating characters or
+  sheets (ask Videoclaw in a chat). Taste proposals are now part of `videoclaw_get_taste`.
 
 ## Develop
 

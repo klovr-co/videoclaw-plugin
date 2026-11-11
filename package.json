@@ -1,6 +1,6 @@
 {
   "name": "videoclaw-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Unofficial MCP server, CLI and Claude Code plugin for the Videoclaw desktop app: create video sessions, track long builds, approve versions, share renders.",
   "keywords": [
     "videoclaw",

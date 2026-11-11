@@ -4769,9 +4769,9 @@ var require_core = __commonJS({
     exports.default = Ajv2;
     function checkOptions(checkOpts, options, msg, log = "error") {
       for (const key in checkOpts) {
-        const opt = key;
-        if (opt in options)
-          this.logger[log](`${msg}: option ${key}. ${checkOpts[opt]}`);
+        const opt2 = key;
+        if (opt2 in options)
+          this.logger[log](`${msg}: option ${key}. ${checkOpts[opt2]}`);
       }
     }
     function getSchEnv(keyRef) {
@@ -4810,8 +4810,8 @@ var require_core = __commonJS({
     }
     function getMetaSchemaOptions() {
       const metaOpts = { ...this.opts };
-      for (const opt of META_IGNORE_OPTIONS)
-        delete metaOpts[opt];
+      for (const opt2 of META_IGNORE_OPTIONS)
+        delete metaOpts[opt2];
       return metaOpts;
     }
     var noLogs = { log() {
@@ -10729,7 +10729,7 @@ var ZodEnum = class _ZodEnum extends ZodType {
     });
   }
   exclude(values, newDef = this._def) {
-    return _ZodEnum.create(this.options.filter((opt) => !values.includes(opt)), {
+    return _ZodEnum.create(this.options.filter((opt2) => !values.includes(opt2)), {
       ...this._def,
       ...newDef
     });
@@ -13280,9 +13280,9 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       });
       return payload;
     }
-    const opt = disc.value.get(input?.[def.discriminator]);
-    if (opt) {
-      return opt._zod.run(payload, ctx);
+    const opt2 = disc.value.get(input?.[def.discriminator]);
+    if (opt2) {
+      return opt2._zod.run(payload, ctx);
     }
     if (def.unionFallback) {
       return _super(payload, ctx);
@@ -21562,15 +21562,21 @@ var StdioServerTransport = class {
 };
 
 // src/videoclaw.mjs
-import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { basename, isAbsolute, join as join2 } from "node:path";
+
+// src/connect.mjs
+import { spawn, execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 var PORT = Number(process.env.VIDEOCLAW_CDP_PORT ?? 9339);
 var APP = process.env.VIDEOCLAW_APP ?? "/Applications/Videoclaw.app";
-var USER_DATA = join(homedir(), "Library", "Application Support", "Videoclaw");
+var DATA_DIR = join(homedir(), "Library", "Application Support", "videoclaw-app", "data");
+var WORKSPACE = join(DATA_DIR, "workspace");
+var DB = join(DATA_DIR, "videoclaw.sqlite");
 var AUTO_LAUNCH = process.env.VIDEOCLAW_AUTO_LAUNCH !== "0";
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function findPage() {
   let targets;
   try {
@@ -21585,74 +21591,48 @@ async function findPage() {
   if (!page) throw new Error("Videoclaw is running but its main window isn't open yet.");
   return page;
 }
-var Cdp = class _Cdp {
-  static async connect() {
-    if (AUTO_LAUNCH) await ensureApp();
-    const page = await findPage();
-    const ws = new WebSocket(page.webSocketDebuggerUrl);
+async function evaluate(expression) {
+  const page = await findPage();
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  try {
     await new Promise((resolve, reject) => {
       ws.addEventListener("open", resolve, { once: true });
       ws.addEventListener("error", () => reject(new Error("DevTools connection failed.")), { once: true });
     });
-    return new _Cdp(ws);
-  }
-  constructor(ws) {
-    this.ws = ws;
-    this.nextId = 1;
-    this.pending = /* @__PURE__ */ new Map();
-    ws.addEventListener("message", (msg) => {
-      const data = JSON.parse(msg.data);
-      const waiter = data.id && this.pending.get(data.id);
-      if (!waiter) return;
-      this.pending.delete(data.id);
-      data.error ? waiter.reject(new Error(data.error.message)) : waiter.resolve(data.result);
-    });
-  }
-  send(method, params) {
-    const id = this.nextId++;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-  }
-  /** Evaluate `fn(arg)` in the renderer and return its (awaited) JSON result. */
-  async call(fn, arg) {
-    const expression = `(${fn.toString()})(${JSON.stringify(arg ?? null)})`;
-    const { result, exceptionDetails } = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true
-    });
-    if (exceptionDetails) {
-      throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
-    }
+    const reply = new Promise(
+      (resolve) => ws.addEventListener("message", (m) => {
+        const data2 = JSON.parse(m.data);
+        if (data2.id === 1) resolve(data2);
+      })
+    );
+    ws.send(
+      JSON.stringify({
+        id: 1,
+        method: "Runtime.evaluate",
+        params: { expression, awaitPromise: true, returnByValue: true }
+      })
+    );
+    const data = await reply;
+    if (data.error) throw new Error(data.error.message);
+    const { result, exceptionDetails } = data.result;
+    if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     return result.value;
-  }
-  close() {
-    this.ws.close();
-  }
-};
-async function withApp(fn, arg) {
-  const cdp = await Cdp.connect();
-  try {
-    return await cdp.call(fn, arg);
   } finally {
-    cdp.close();
+    ws.close();
   }
 }
-var PRELUDE = `
-  const vc = window.videoclaw;
-  const workspace = async () => (await vc.bootstrapStatus())?.workspacePath ?? (await vc.listSessions())[0]?.cwd;
-  const appScope = async (extra) => {
-    const [settings, account] = await Promise.all([vc.getSettings(), vc.accountSnapshot()]);
-    if (!account?.storedKeyId) throw new Error("Videoclaw isn't signed in.");
-    return { ...extra, gatewayUrl: String(settings.gatewayUrl).replace(/\\/+$/, ""), canonicalKeyId: account.storedKeyId };
-  };
-  const unwrap = (reply) => {
-    if (reply && reply.ok === false) throw new Error(reply.message ?? "Videoclaw refused that.");
-    return reply && "value" in reply ? reply.value : reply;
-  };
-`;
-function app(fn, arg) {
-  return withApp({ toString: () => `(async (arg) => { ${PRELUDE}; return (${fn})(arg); })` }, arg);
+async function serverAddress() {
+  if (AUTO_LAUNCH) await ensureApp();
+  for (let i = 0; i < 20; i++) {
+    const address = await evaluate(
+      "window.videoclaw && typeof window.videoclaw.server === 'function' ? window.videoclaw.server() : null"
+    ).catch(() => null);
+    if (address?.port && address?.secret) return address;
+    await sleep(500);
+  }
+  throw new Error(
+    "Videoclaw is open, but it doesn't offer the server bridge this plugin uses. This plugin needs Videoclaw 0.2 or newer; update Videoclaw or this plugin."
+  );
 }
 async function isReachable() {
   try {
@@ -21670,10 +21650,18 @@ function isRunning() {
     return false;
   }
 }
-function runningSessions() {
+function busyVideos() {
   try {
-    const registry2 = JSON.parse(readFileSync(join(USER_DATA, "sessions.json"), "utf8"));
-    return (registry2.sessions ?? []).filter((s) => s.status === "running");
+    const out = execFileSync(
+      "sqlite3",
+      [
+        "-readonly",
+        DB,
+        "select v.title from turns t join videos v on v.id = t.video_id where t.status <> 'ended'"
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+    return out.split("\n").filter(Boolean);
   } catch {
     return [];
   }
@@ -21681,10 +21669,10 @@ function runningSessions() {
 async function ensureApp() {
   if (await isReachable()) return;
   if (isRunning()) {
-    const busy = runningSessions();
+    const busy = busyVideos();
     if (busy.length) {
       throw new Error(
-        `Videoclaw is open without its DevTools port and is busy (${busy.map((s) => s.title).join(", ")}). It will be reconnected automatically once that job finishes; try again then, or run \`vc launch --restart\` to interrupt it.`
+        `Videoclaw is open without its DevTools port and is busy (${busy.join(", ")}). It reconnects automatically once that job finishes; try again then, or run \`vc launch --restart\` to interrupt it.`
       );
     }
   }
@@ -21699,7 +21687,7 @@ async function launch({ restart = false } = {}) {
       );
     }
     execFileSync("osascript", ["-e", 'tell application "Videoclaw" to quit']);
-    for (let i = 0; i < 120 && isRunning(); i++) await new Promise((r) => setTimeout(r, 250));
+    for (let i = 0; i < 120 && isRunning(); i++) await sleep(250);
     if (isRunning()) throw new Error("Videoclaw didn't quit; close it and try again.");
   }
   const { ELECTRON_RUN_AS_NODE, ...env } = process.env;
@@ -21710,538 +21698,642 @@ async function launch({ restart = false } = {}) {
   }).unref();
   for (let i = 0; i < 120; i++) {
     if (await isReachable()) {
-      await new Promise((r) => setTimeout(r, 1500));
+      await sleep(1500);
       return { status: "launched", port: PORT };
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await sleep(500);
   }
   throw new Error("Videoclaw started but the DevTools port never came up.");
 }
-function listClients() {
-  return withApp(() => window.videoclaw.listClients());
+var VideoclawError = class extends Error {
+  constructor(message, tag, detail) {
+    super(message);
+    this.tag = tag;
+    this.detail = detail;
+  }
+};
+var FRIENDLY = {
+  TurnInProgress: "Videoclaw is still working on this video.",
+  VideoNotFound: "No Videoclaw video has that id. Use videoclaw_list_sessions.",
+  ProjectNotFound: "No Videoclaw project has that id. Use videoclaw_list_clients.",
+  VersionNotFound: "This video has no version with that number.",
+  QuestionNotOpen: "That question is no longer open.",
+  AskNotOpen: "That request is no longer open.",
+  NoLiveTurn: "Nothing is running on this video.",
+  UpdateRequired: "Videoclaw needs an update before it can do this.",
+  ServerStopping: "Videoclaw is shutting down. Try again in a moment.",
+  StoreUnavailable: "Videoclaw couldn't read or save its data. Try again."
+};
+function failure(cause = []) {
+  const fail = cause.find((c) => c._tag === "Fail");
+  if (fail) {
+    const err = fail.error ?? {};
+    const tag = err._tag ?? "Error";
+    const extra = Object.entries(err).filter(([k]) => k !== "_tag").map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join(", ");
+    return new VideoclawError(`${FRIENDLY[tag] ?? tag}${extra ? ` (${tag}; ${extra})` : ""}`, tag, err);
+  }
+  const die = cause.find((c) => c._tag === "Die");
+  if (die) return new VideoclawError(`Videoclaw rejected the request: ${String(die.defect)}`, "Defect", die.defect);
+  if (cause.some((c) => c._tag === "Interrupt")) return new VideoclawError("Videoclaw interrupted the request.", "Interrupt");
+  return new VideoclawError(`Videoclaw failed: ${JSON.stringify(cause)}`, "Unknown", cause);
 }
-async function listSessions() {
-  const sessions = await withApp(() => window.videoclaw.listSessions());
-  return sessions.map((s) => ({
-    sessionId: s.sessionId,
-    title: s.title,
-    clientId: s.clientId,
-    status: s.status,
-    jobId: s.jobId,
-    permissionMode: s.permissionMode,
-    totalCostUsd: s.totalCostUsd,
-    createdAt: s.createdAt && new Date(s.createdAt).toISOString()
+var Rpc = class {
+  constructor() {
+    this.ws = null;
+    this.opening = null;
+    this.nextId = 1;
+    this.handlers = /* @__PURE__ */ new Map();
+  }
+  async open() {
+    if (this.ws?.readyState === WebSocket.OPEN) return this.ws;
+    if (this.opening) return this.opening;
+    this.opening = (async () => {
+      const { port, secret } = await serverAddress();
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, ["videoclaw", `videoclaw.secret.${secret}`]);
+      await new Promise((resolve, reject) => {
+        ws.addEventListener("open", resolve, { once: true });
+        ws.addEventListener("error", () => reject(new Error("Couldn't connect to the Videoclaw server.")), {
+          once: true
+        });
+      });
+      ws.addEventListener("message", (m) => this.onMessage(m.data));
+      ws.addEventListener("close", () => {
+        if (this.ws === ws) this.ws = null;
+        clearInterval(this.pinger);
+        for (const h of this.handlers.values()) h.onExit(new VideoclawError("Lost the connection to Videoclaw.", "Closed"));
+        this.handlers.clear();
+      });
+      this.pinger = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('{"_tag":"Ping"}');
+      }, 1e4);
+      this.pinger.unref?.();
+      this.ws = ws;
+      return ws;
+    })();
+    try {
+      return await this.opening;
+    } finally {
+      this.opening = null;
+    }
+  }
+  onMessage(raw) {
+    for (const msg of [].concat(JSON.parse(String(raw)))) {
+      if (msg._tag === "Ping") {
+        this.ws?.send('{"_tag":"Pong"}');
+        continue;
+      }
+      const h = this.handlers.get(msg.requestId);
+      if (!h) continue;
+      if (msg._tag === "Chunk") {
+        this.ws?.send(JSON.stringify({ _tag: "Ack", requestId: msg.requestId }));
+        for (const v of msg.values ?? []) h.onChunk(v);
+      } else if (msg._tag === "Exit") {
+        this.handlers.delete(msg.requestId);
+        if (msg.exit?._tag === "Success") h.onExit(null, msg.exit.value);
+        else h.onExit(failure(msg.exit?.cause));
+      } else if (msg._tag === "Defect") {
+        this.handlers.delete(msg.requestId);
+        h.onExit(new VideoclawError(`Videoclaw error: ${JSON.stringify(msg.defect)}`, "Defect"));
+      }
+    }
+  }
+  async request(tag, payload, onChunk = () => {
+  }) {
+    const ws = await this.open();
+    const id = String(this.nextId++);
+    let settle;
+    const done = new Promise((resolve, reject) => {
+      settle = (err, value) => err ? reject(err) : resolve(value);
+    });
+    this.handlers.set(id, { onChunk, onExit: settle });
+    ws.send(JSON.stringify({ _tag: "Request", id, tag, payload: payload ?? null, headers: [] }));
+    const cancel = () => {
+      if (!this.handlers.has(id)) return;
+      this.handlers.delete(id);
+      settle(null);
+      this.ws?.send(JSON.stringify({ _tag: "Interrupt", requestId: id, interruptors: [] }));
+    };
+    return { done, cancel };
+  }
+  /** Call a method and return its result. */
+  async call(tag, payload) {
+    const { done } = await this.request(tag, payload);
+    return done;
+  }
+  /**
+   * Read a stream. `onValue` gets each value and returns true to stop.
+   * Resolves when it stops, the stream ends, or `timeoutMs` passes.
+   */
+  async watch(tag, payload, onValue, { timeoutMs = 1e4 } = {}) {
+    let req;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      req?.cancel();
+    };
+    req = await this.request(tag, payload, (v) => {
+      if (!stopped && onValue(v)) stop();
+    });
+    const timer = setTimeout(stop, timeoutMs);
+    try {
+      await req.done;
+    } finally {
+      clearTimeout(timer);
+      stopped = true;
+    }
+  }
+  /** The first value of a stream (its snapshot). */
+  async first(tag, payload, { timeoutMs = 1e4 } = {}) {
+    let value;
+    let got = false;
+    await this.watch(tag, payload, (v) => (value = v, got = true), { timeoutMs });
+    if (!got) throw new VideoclawError(`Videoclaw didn't answer ${tag} in time.`, "Timeout");
+    return value;
+  }
+  close() {
+    clearInterval(this.pinger);
+    this.ws?.close();
+    this.ws = null;
+  }
+  /** Base URL of the Videoclaw server, for uploads. */
+  async baseUrl() {
+    const ws = await this.open();
+    return ws.url.replace(/^ws/, "http").replace(/\/ws$/, "");
+  }
+};
+var rpc = new Rpc();
+
+// src/videoclaw.mjs
+var NEEDS_USER = /* @__PURE__ */ new Set(["question", "money", "fileRequest", "rights", "voiceover"]);
+var usd = (micro) => micro == null ? null : Math.round(micro / 1e4) / 100;
+var jobDir = (jobId) => join2(WORKSPACE, "jobs", jobId);
+var opt = (o) => o?._tag === "Some" ? o.value : o?._tag === "None" ? null : o ?? null;
+function localPath(media) {
+  const m = /^\/(media|assets)\/([^/]+)\/(.+)$/.exec(media ?? "");
+  if (!m) return null;
+  return m[1] === "media" ? join2(jobDir(m[2]), "renders", m[3]) : join2(jobDir(m[2]), m[3]);
+}
+var catalog = () => rpc.first("watchCatalog", null);
+var slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+async function resolveProject(ref, cat) {
+  cat ??= await catalog();
+  const want = String(ref ?? "").trim();
+  const p = cat.projects.find((x) => x.id === want) ?? cat.projects.find((x) => x.name.toLowerCase() === want.toLowerCase()) ?? cat.projects.find((x) => slug(x.name) === slug(want));
+  if (!p) {
+    throw new VideoclawError(
+      `No Videoclaw project matches "${ref}". Projects: ${cat.projects.map((x) => x.name).join(", ")}.`,
+      "ProjectNotFound"
+    );
+  }
+  return p;
+}
+async function listClients() {
+  const cat = await catalog();
+  return cat.projects.map((p) => ({
+    clientId: p.id,
+    name: p.name,
+    videos: cat.videos.filter((v) => v.projectId === p.id).length
   }));
 }
-function createSession({ clientId: clientId2 } = {}) {
-  return withApp((req) => window.videoclaw.createSession(req), clientId2 ? { clientId: clientId2 } : {});
+var videoRow = (v, projects) => ({
+  sessionId: v.id,
+  title: v.title,
+  client: projects.find((p) => p.id === v.projectId)?.name,
+  clientId: v.projectId,
+  status: v.mark,
+  // needsYou | working | done | idle
+  model: v.model,
+  mode: v.mode
+});
+async function listSessions({ clientId: clientId2 } = {}) {
+  const cat = await catalog();
+  let videos = cat.videos;
+  if (clientId2) {
+    const p = await resolveProject(clientId2, cat);
+    videos = videos.filter((v) => v.projectId === p.id);
+  }
+  return videos.map((v) => videoRow(v, cat.projects));
 }
-function history(sessionId2) {
-  return withApp((id) => window.videoclaw.getHistory(id), sessionId2);
+async function createSession({ clientId: clientId2, title } = {}) {
+  const cat = await catalog();
+  const project = clientId2 ? await resolveProject(clientId2, cat) : cat.projects.find((p) => p.name === "Personal") ?? cat.projects[0];
+  const video = await rpc.call("createVideo", {
+    projectId: project.id,
+    title: title?.trim() || "New video",
+    videoId: randomUUID()
+  });
+  return videoRow(video, cat.projects);
 }
-async function transcript(sessionId2) {
-  const raw = await history(sessionId2);
-  const events = Array.isArray(raw) ? raw : raw?.events ?? [];
-  return toTranscript(events);
+var renameSession = (sessionId2, title) => rpc.call("renameVideo", { videoId: sessionId2, title });
+async function setAgentSettings(sessionId2, changes) {
+  const cat = await catalog();
+  const v = cat.videos.find((x) => x.id === sessionId2);
+  if (!v) throw new VideoclawError(`No Videoclaw video has id ${sessionId2}.`, "VideoNotFound");
+  const next = {
+    model: changes.model ?? v.model,
+    effort: changes.effort === void 0 ? v.effort : changes.effort,
+    mode: changes.mode ?? v.mode,
+    fast: changes.fast ?? v.fast
+  };
+  const updated = await rpc.call("setAgentSettings", { videoId: sessionId2, ...next });
+  return videoRow(updated, cat.projects);
 }
-function toTranscript(events) {
+async function createClient(name) {
+  return rpc.call("createProject", { name, projectId: randomUUID() });
+}
+async function renameClient(clientId2, name) {
+  const p = await resolveProject(clientId2);
+  return rpc.call("renameProject", { projectId: p.id, name });
+}
+async function uploadFiles(sessionId2, paths, requestId) {
+  const landed = [];
+  for (const path of paths ?? []) {
+    if (!isAbsolute(path)) throw new VideoclawError(`Use an absolute path: ${path}`, "BadPath");
+    const { size } = await stat(path);
+    let ticket;
+    try {
+      ticket = await rpc.call("intakeTicket", {
+        videoId: sessionId2,
+        name: basename(path),
+        size,
+        ...requestId ? { requestId } : {}
+      });
+    } catch (err) {
+      if (err.tag === "TakeLanded") {
+        landed.push(err.detail.path);
+        continue;
+      }
+      throw err;
+    }
+    const res = await fetch(ticket.url, { method: "POST", body: await readFile(path) });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok || out.refused) {
+      throw new VideoclawError(`Videoclaw refused ${basename(path)} (${out.refused ?? res.status}).`, "IntakeRefused");
+    }
+    landed.push(out.path);
+  }
+  return landed;
+}
+var withFiles = (text, paths) => {
+  if (!paths.length) return text;
+  const list = ["Files I added to this video:", ...paths.map((p) => `- ${p}`), "Use these files as source material where relevant."].join("\n");
+  const body = String(text ?? "").trim();
+  return body ? `${body}
+
+${list}` : list;
+};
+async function send(sessionId2, message, { files: files2 } = {}) {
+  const attached = await uploadFiles(sessionId2, files2);
+  const text = withFiles(message, attached);
+  const clientTurnId = randomUUID();
+  try {
+    const receipt = await rpc.call("send", { videoId: sessionId2, clientTurnId, text });
+    return { sent: true, queued: false, turnId: receipt.turnId, attached };
+  } catch (err) {
+    if (err.tag !== "TurnInProgress") throw err;
+    await rpc.call("queueMessage", { videoId: sessionId2, clientTurnId, text, steer: false });
+    return { sent: true, queued: true, attached };
+  }
+}
+var interrupt = (sessionId2) => rpc.call("stop", { videoId: sessionId2 });
+var VideoState = class {
+  constructor() {
+    this.snap = null;
+    this.assets = null;
+  }
+  apply(ev) {
+    const s = this.snap;
+    switch (ev._tag) {
+      case "VideoSnapshot":
+        this.snap = { ...ev, items: [...ev.items], live: [...ev.live], turns: [...ev.turns] };
+        break;
+      case "AssetsChanged":
+        this.assets = ev.assets;
+        break;
+      case "ItemCommitted":
+        if (!s) break;
+        s.live = s.live.filter((x) => x.id !== ev.item.id);
+        s.items = s.items.filter((x) => x.id !== ev.item.id).concat(ev.item);
+        break;
+      case "LiveChanged":
+        if (!s) break;
+        s.live = s.live.filter((x) => x.id !== ev.live.id).concat(ev.live);
+        break;
+      case "ItemDelta": {
+        if (!s) break;
+        let item = s.live.find((x) => x.id === ev.itemId);
+        if (!item) {
+          item = { id: ev.itemId, kind: "agentMessage", turnId: ev.turnId, text: "" };
+          s.live.push(item);
+        }
+        item.text = (item.text ?? "").slice(0, ev.offset) + ev.text;
+        break;
+      }
+      case "TurnChanged":
+        if (!s) break;
+        s.turns = s.turns.filter((t) => t.id !== ev.turn.id).concat(ev.turn);
+        s.retry = ev.retry;
+        break;
+      case "OutputChanged":
+        if (s) s.output = ev.output;
+        break;
+      case "QueueChanged":
+        if (s) s.queue = ev.queue;
+        break;
+      case "VideoChanged":
+        if (s) s.video = ev.video;
+        break;
+    }
+  }
+  get turn() {
+    return this.snap?.turns.at(-1);
+  }
+  get running() {
+    const tag = this.turn?.status?._tag;
+    return tag === "Starting" || tag === "Running";
+  }
+  get waiting() {
+    return (this.snap?.live ?? []).filter((x) => NEEDS_USER.has(x.kind));
+  }
+};
+async function readVideo(sessionId2, { assets = false, waitMs = 0, until } = {}) {
+  const state = new VideoState();
+  await rpc.watch(
+    "watchVideo",
+    { videoId: sessionId2 },
+    (ev) => {
+      state.apply(ev);
+      if (!state.snap) return false;
+      if (assets && !state.assets) return false;
+      if (until) return until(state);
+      return true;
+    },
+    { timeoutMs: Math.max(waitMs, 8e3) }
+  );
+  if (!state.snap) throw new VideoclawError("Videoclaw didn't send this video's state in time.", "Timeout");
+  return state;
+}
+function describeWaiting(item) {
+  const base = { itemId: item.id };
+  switch (item.kind) {
+    case "question": {
+      const permission = item.questions.some((q) => q.permission);
+      return {
+        ...base,
+        kind: permission ? "permission" : "question",
+        answerable: !permission,
+        ...permission ? { note: "A permission request. The user answers it in the Videoclaw window." } : {},
+        questions: item.questions.map((q) => ({
+          id: q.id,
+          header: q.header,
+          question: q.question,
+          multiSelect: q.multiSelect,
+          options: q.options.map((o) => o.description ? `${o.label} (${o.description})` : o.label),
+          ...q.permission ? { permission: q.permission.detail } : {}
+        }))
+      };
+    }
+    case "money":
+      return {
+        ...base,
+        kind: "spend",
+        answerable: false,
+        line: item.line,
+        maximumUsd: usd(item.maximumMicroUsd),
+        note: "A spend approval. The user approves or denies it in the Videoclaw window."
+      };
+    case "fileRequest":
+      return { ...base, kind: "files", answerable: true, description: item.description, accept: item.accept };
+    case "rights":
+      return { ...base, kind: "rights", answerable: true, purpose: item.purpose, subject: item.subject };
+    case "voiceover":
+      return { ...base, kind: "voiceover", answerable: true, script: item.script, direction: item.direction };
+    default:
+      return { ...base, kind: item.kind };
+  }
+}
+function versionsOf(state) {
+  const jobId = state.snap.video.jobId;
+  const final = state.snap.output.final;
+  return state.snap.output.versions.map((v) => ({
+    version: v.n,
+    final: v.n === final,
+    path: localPath(v.media) ?? join2(jobDir(jobId), "renders", basename(v.media))
+  }));
+}
+function summarize(state) {
+  const { snap } = state;
+  const turn = state.turn;
+  const inTurn = (x) => turn && x.turnId === turn.id;
+  const all = [...snap.items, ...snap.live];
+  const messages = all.filter((x) => x.kind === "agentMessage" && inTurn(x)).map((x) => x.text);
+  const status = turn?.status;
+  const versions = versionsOf(state);
+  return {
+    sessionId: snap.video.id,
+    title: snap.video.title,
+    status: state.running ? "running" : status?.outcome === "failed" ? "error" : "idle",
+    done: !state.running || state.waiting.length > 0,
+    lastRequest: [...snap.items].reverse().find((x) => x.kind === "userMessage")?.text,
+    reply: messages.join("\n\n") || null,
+    toolsUsedThisTurn: all.filter((x) => x.kind === "tool" && inTurn(x)).map((x) => x.title),
+    notices: all.filter((x) => x.kind === "notice" && inTurn(x)).map((x) => x.text),
+    errors: status?.error ? [`${status.error.code}: ${status.error.detail}`] : [],
+    outcome: status?.outcome ?? null,
+    costUsd: usd(turn?.costMicroUsd),
+    waitingOnUser: state.waiting.map(describeWaiting),
+    queued: snap.queue.map((q) => q.text),
+    latestVersion: versions.at(-1) ?? null,
+    finalVersion: versions.find((v) => v.final) ?? null,
+    jobPath: jobDir(snap.video.jobId)
+  };
+}
+async function checkProgress(sessionId2, { waitMs = 4 * 6e4 } = {}) {
+  const state = await readVideo(sessionId2, {
+    waitMs,
+    until: (s) => !s.running || s.waiting.length > 0
+  });
+  return summarize(state);
+}
+async function history(sessionId2, { limit = 40, tools = false } = {}) {
+  const state = await readVideo(sessionId2);
+  const keep = (x) => x.kind === "userMessage" || x.kind === "agentMessage" || x.kind === "notice" || tools && x.kind === "tool";
+  return state.snap.items.filter(keep).slice(-limit).map((x) => ({
+    role: x.kind === "userMessage" ? "user" : x.kind === "agentMessage" ? "assistant" : x.kind,
+    text: x.text ?? x.title
+  }));
+}
+async function getJob(sessionId2, { all = false } = {}) {
+  const state = await readVideo(sessionId2, { assets: true });
+  const assets = (state.assets ?? []).map((a) => ({ kind: a.kind, path: localPath(a.media), modified: a.modified }));
+  assets.sort((a, b) => b.modified - a.modified);
+  return {
+    sessionId: sessionId2,
+    title: state.snap.video.title,
+    jobPath: jobDir(state.snap.video.jobId),
+    versions: versionsOf(state),
+    assets: all ? assets : assets.slice(0, 30),
+    assetCount: assets.length
+  };
+}
+async function pending(sessionId2) {
+  if (sessionId2) {
+    const state = await readVideo(sessionId2);
+    return state.waiting.map(describeWaiting);
+  }
+  const cat = await catalog();
   const out = [];
-  for (const e of events) {
-    if (e.kind === "user_text") out.push({ role: "user", text: e.text });
-    else if (e.kind === "assistant_text") {
-      const last = out.at(-1);
-      if (last?.role === "assistant" && e.messageId && last.messageId === e.messageId) {
-        last.text = e.text.startsWith(last.text) || e.text.length >= last.text.length ? e.text : last.text + e.text;
-      } else out.push({ role: "assistant", text: e.text, messageId: e.messageId });
-    } else if (e.kind === "tool_start") out.push({ role: "tool", text: e.toolName ?? "tool" });
-    else if (e.kind === "error") out.push({ role: "error", text: e.message ?? e.text ?? JSON.stringify(e) });
+  for (const v of cat.videos.filter((x) => x.mark === "needsYou")) {
+    const state = await readVideo(v.id);
+    out.push({ sessionId: v.id, title: v.title, waiting: state.waiting.map(describeWaiting) });
   }
   return out;
 }
-async function send(sessionId2, text, { wait = true, timeoutMs = 15 * 6e4, attachmentIds = [] } = {}) {
-  const cdp = await Cdp.connect();
-  try {
-    return await cdp.call(
-      async ({ sessionId: sessionId3, text: text2, wait: wait2, timeoutMs: timeoutMs2, clientTurnId, attachmentIds: attachmentIds2 }) => {
-        const vc2 = window.videoclaw;
-        const events = [];
-        const asks = [];
-        let done;
-        const finished = new Promise((r) => done = r);
-        const offEvent = vc2.onSessionEvent((payload) => {
-          if (payload?.sessionId !== sessionId3) return;
-          events.push(payload.event);
-          if (payload.event?.kind === "result") done("result");
-        });
-        const offAsk = vc2.onPermissionRequest((req) => {
-          if (req?.sessionId === sessionId3) asks.push(req);
-        });
-        try {
-          const receipt = await vc2.sendMessage(sessionId3, { text: text2, attachmentIds: attachmentIds2, clientTurnId });
-          if (!wait2) return { receipt };
-          const timer = new Promise((r) => setTimeout(() => r("timeout"), timeoutMs2));
-          const outcome = await Promise.race([finished, timer]);
-          return { receipt, outcome, events, asks };
-        } finally {
-          if (typeof offEvent === "function") offEvent();
-          if (typeof offAsk === "function") offAsk();
-        }
-      },
-      { sessionId: sessionId2, text, wait, timeoutMs, clientTurnId: randomUUID(), attachmentIds }
+async function liveItem(sessionId2, itemId) {
+  const state = await readVideo(sessionId2);
+  const item = state.snap.live.find((x) => x.id === itemId);
+  if (!item) throw new VideoclawError("That request is no longer open. Use videoclaw_get_pending.", "AskNotOpen");
+  return item;
+}
+async function answerQuestion(sessionId2, itemId, answers) {
+  const item = await liveItem(sessionId2, itemId);
+  if (item.kind !== "question") throw new VideoclawError("That request isn't a question.", "WrongKind");
+  if (item.questions.some((q) => q.permission)) {
+    throw new VideoclawError(
+      "That is a permission request. Approve or deny it in the Videoclaw window.",
+      "PermissionNotAnswerable"
     );
-  } finally {
-    cdp.close();
   }
-}
-function interrupt(sessionId2) {
-  return withApp((id) => window.videoclaw.interrupt(id, "user"), sessionId2);
-}
-async function getJob(sessionId2) {
-  const snap = await withApp((id) => window.videoclaw.getJobSnapshot(id), sessionId2);
-  if (!snap?.jobId) return { jobId: null, note: "This session hasn't started a job yet." };
-  const file = (f) => ({ path: f.path, kind: f.kind ?? "video", sizeMb: +(f.sizeBytes / 1e6).toFixed(1), modified: new Date(f.mtimeMs).toISOString() });
-  return {
-    jobId: snap.jobId,
-    jobPath: snap.jobPath,
-    versions: (snap.versions ?? []).map((v) => ({
-      version: v.n,
-      path: v.path,
-      approved: v.approved,
-      isFinal: (snap.finals ?? []).some((f) => f.path === v.path),
-      feedback: v.feedback ?? [],
-      created: new Date(v.createdAtMs).toISOString()
-    })),
-    renders: (snap.renders ?? []).map(file),
-    assets: (snap.assets ?? []).map(file)
-  };
-}
-async function getTaste(clientId2) {
-  const res = await withApp(async ({ clientId: clientId3 }) => {
-    const sessions = await window.videoclaw.listSessions();
-    return window.videoclaw.listTaste(clientId3, sessions[0]?.cwd);
-  }, { clientId: clientId2 });
-  return {
-    clientId: clientId2,
-    layers: (res?.scopes ?? []).map((s) => ({
-      scope: s.scope,
-      label: s.label,
-      file: s.file,
-      applied: Boolean(s.exists && s.cards.length),
-      cards: s.cards
-    })),
-    pendingProposals: res?.proposals ?? []
-  };
-}
-function pendingApprovals(sessionId2) {
-  return withApp(async (sessionId3) => {
-    const vc2 = window.videoclaw;
-    const seen = [];
-    const offs = [
-      vc2.onPermissionRequest((r) => seen.push({ type: "permission", ...r })),
-      vc2.onInputRequest?.((r) => seen.push({ type: "input", ...r }))
-    ];
-    await vc2.replayPendingInteractions();
-    await new Promise((r) => setTimeout(r, 400));
-    for (const off of offs) if (typeof off === "function") off();
-    const unique = new Map(seen.filter((r) => r.sessionId === sessionId3).map((r) => [r.requestId, r]));
-    return [...unique.values()].map((r) => ({
-      type: r.type,
-      kind: r.kind,
-      requestId: r.requestId,
-      title: r.title ?? r.toolName ?? r.question ?? r.message
-    }));
-  }, sessionId2);
-}
-async function sessionStatus(sessionId2) {
-  const s = (await listSessions()).find((x) => x.sessionId === sessionId2);
-  if (!s) throw new Error(`No Videoclaw session ${sessionId2}.`);
-  return s.status;
-}
-async function checkProgress(sessionId2, { waitMs = 4 * 6e4, pollMs = 5e3 } = {}) {
-  const deadline = Date.now() + waitMs;
-  let status = await sessionStatus(sessionId2);
-  while (status === "running" && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, Math.min(pollMs, deadline - Date.now())));
-    status = await sessionStatus(sessionId2);
+  const byKey = (k) => item.questions.find((q) => q.id === k) ?? item.questions.find((q) => q.question === k) ?? item.questions.find((q) => q.header && q.header === k) ?? (item.questions.length === 1 ? item.questions[0] : void 0);
+  const out = {};
+  for (const [key, value] of Object.entries(answers)) {
+    const q = byKey(key);
+    if (!q) throw new VideoclawError(`No question matches "${key}".`, "UnknownQuestion");
+    const list = [value].flat().map(String);
+    out[q.id] = q.multiSelect ? list : list.join(", ");
   }
-  const msgs = await transcript(sessionId2);
-  const lastUser = msgs.findLastIndex((m) => m.role === "user");
-  const turn = msgs.slice(lastUser + 1);
-  const [approvals, job] = await Promise.all([pendingApprovals(sessionId2), getJob(sessionId2)]);
-  return {
-    status,
-    // running | idle | error
-    done: status !== "running",
-    lastRequest: msgs[lastUser]?.text,
-    reply: turn.filter((m) => m.role === "assistant").map((m) => m.text).join("\n\n") || null,
-    toolsUsedThisTurn: turn.filter((m) => m.role === "tool").length,
-    errors: turn.filter((m) => m.role === "error").map((m) => m.text),
-    waitingOnUser: approvals,
-    renders: job.renders ?? [],
-    jobPath: job.jobPath ?? null
-  };
+  await rpc.call("answer", { videoId: sessionId2, itemId, answers: out });
+  return { answered: Object.keys(out).length };
 }
-
-// src/studio.mjs
-import { basename } from "node:path";
-import { randomUUID as randomUUID2 } from "node:crypto";
-var fileRef = (path) => ({ path, name: basename(path) });
-var publicShare = (s) => ({
-  shareId: s.shareId,
-  status: s.revokedAtMs ? "revoked" : s.expiresAtMs && s.expiresAtMs < Date.now() ? "expired" : "active",
-  url: s.url,
-  title: s.title,
-  version: s.versionN,
-  path: s.path,
-  sizeMb: s.sizeBytes ? +(s.sizeBytes / 1e6).toFixed(1) : void 0,
-  created: s.createdAtMs ? new Date(s.createdAtMs).toISOString() : void 0,
-  expires: s.expiresAtMs ? new Date(s.expiresAtMs).toISOString() : void 0
-});
-function getPlan(sessionId2) {
-  return app(async (sessionId3) => {
-    const plan = unwrap(await vc.readSessionPlan(await appScope({ sessionId: sessionId3 })));
-    if (!plan) return { plan: null, note: "This session has no plan card." };
-    return { plan };
-  }, sessionId2);
-}
-function choosePlan(sessionId2, action, correction) {
-  return app(
-    async ({ sessionId: sessionId3, action: action2, correction: correction2, clientActionId }) => {
-      const scope = await appScope({ sessionId: sessionId3 });
-      const plan = unwrap(await vc.readSessionPlan(scope));
-      if (!plan) throw new Error("This session has no plan to choose.");
-      const reply = await vc.chooseSessionPlan(scope, {
-        planId: plan.id,
-        revision: plan.revision,
-        action: action2,
-        clientActionId,
-        ...action2 === "change" ? { correction: correction2 } : {}
-      });
-      return { chosen: action2, plan: unwrap(reply) };
-    },
-    { sessionId: sessionId2, action, correction, clientActionId: randomUUID2() }
+async function respondRequest(sessionId2, itemId, { kind, paths, accepted }) {
+  const item = await liveItem(sessionId2, itemId);
+  if (item.kind === "fileRequest") {
+    if (kind === "cancel" || kind === "decline") {
+      await rpc.call("respond", { videoId: sessionId2, itemId, answer: "Decline" });
+      return { declined: true };
+    }
+    if (!paths?.length) throw new VideoclawError("Give the file paths to send.", "NoFiles");
+    const landed = await uploadFiles(sessionId2, paths, itemId);
+    await rpc.call("respond", { videoId: sessionId2, itemId, answer: "Send" });
+    return { sent: landed };
+  }
+  if (item.kind === "rights") {
+    const yes = kind === "rights" && accepted === true;
+    await rpc.call("respond", { videoId: sessionId2, itemId, answer: yes ? "Confirm" : "Cancel" });
+    return { confirmed: yes };
+  }
+  if (item.kind === "voiceover") {
+    const keep = kind === "voiceover" && accepted !== false;
+    await rpc.call("respond", { videoId: sessionId2, itemId, answer: keep ? "Send" : "Decline" });
+    return { kept: keep };
+  }
+  throw new VideoclawError(
+    item.kind === "money" ? "That is a spend approval. The user approves it in the Videoclaw window." : `Can't answer a ${item.kind} request here.`,
+    "NotAnswerable"
   );
 }
-function approveVersion(sessionId2, version2) {
-  return app(({ sessionId: sessionId3, version: version3 }) => vc.approveVersion(sessionId3, version3), { sessionId: sessionId2, version: version2 });
-}
-function revertFinal(sessionId2, version2) {
-  return app(({ sessionId: sessionId3, version: version3 }) => vc.revertFinal(sessionId3, version3), { sessionId: sessionId2, version: version2 });
-}
-function reopenSession(sessionId2) {
-  return app((sessionId3) => vc.unfinalizeSession(sessionId3), sessionId2);
+async function approveVersion(sessionId2, version2) {
+  const output = await rpc.call("markFinal", { videoId: sessionId2, n: Number(version2) });
+  return { final: output.final, versions: output.versions.length };
 }
 async function shareCreate(sessionId2, { version: version2, title } = {}) {
-  return publicShare(await app(
-    async ({ sessionId: sessionId3, version: version3, title: title2 }) => {
-      const job = await vc.getJobSnapshot(sessionId3);
-      const versions = job?.versions ?? [];
-      const pick2 = version3 !== void 0 ? versions.find((v) => v.n === version3) : job?.finals?.at(-1) ?? versions.at(-1);
-      if (!pick2) throw new Error(version3 !== void 0 ? `This session has no V${version3}.` : "This session has no finished version to share yet.");
-      const session = (await vc.listSessions()).find((s) => s.sessionId === sessionId3);
-      await vc.shareCreate({ sessionId: sessionId3, path: pick2.path, title: (title2 || session?.title || "Video").slice(0, 120) });
-      const shares = await vc.shareList(sessionId3);
-      const live = shares.filter((s) => s.path === pick2.path && !s.revokedAtMs);
-      return live.sort((a, b) => b.createdAtMs - a.createdAtMs)[0] ?? { path: pick2.path };
-    },
-    { sessionId: sessionId2, version: version2, title }
-  ));
+  const state = await readVideo(sessionId2);
+  const out = state.snap.output;
+  const n = Number(version2 ?? out.final ?? out.versions.at(-1)?.n);
+  if (!n) throw new VideoclawError("This video has no versions to share yet.", "VersionNotFound");
+  const share = await rpc.call("shareVersion", {
+    videoId: sessionId2,
+    n,
+    title: title?.trim() || `${state.snap.video.title} (V${n})`
+  });
+  return shareRow(share);
 }
+var shareRow = (s) => ({
+  shareId: s.id,
+  sessionId: s.videoId,
+  version: s.n,
+  title: s.title,
+  url: s.url,
+  status: s.state,
+  // active | unresolved | expired | stopped
+  createdAt: s.createdAt,
+  expiresAt: s.expiresAt
+});
 async function shareList(sessionId2) {
-  return (await app((sessionId3) => vc.shareList(sessionId3 ?? void 0), sessionId2 ?? null)).map(publicShare);
+  const { shares } = await rpc.first("watchShares", null);
+  return shares.filter((s) => !sessionId2 || s.videoId === sessionId2).map(shareRow);
 }
-function shareRevoke(shareId) {
-  return app((shareId2) => vc.shareRevoke(shareId2), shareId);
+async function shareRevoke(shareId) {
+  return shareRow(await rpc.call("stopSharing", { shareId }));
 }
-function pendingRequests(sessionId2) {
-  return app(async (sessionId3) => {
-    const seen = [];
-    const offs = [
-      vc.onPermissionRequest((r) => seen.push({ channel: "permission", ...r })),
-      vc.onInputRequest((r) => seen.push({ channel: "input", ...r }))
-    ];
-    await vc.replayPendingInteractions();
-    await new Promise((r) => setTimeout(r, 400));
-    for (const off of offs) if (typeof off === "function") off();
-    const unique = new Map(seen.filter((r) => !sessionId3 || r.sessionId === sessionId3).map((r) => [r.requestId, r]));
-    return [...unique.values()];
-  }, sessionId2 ?? null);
-}
-async function answerQuestion(sessionId2, requestId, answers) {
-  const req = (await pendingRequests(sessionId2)).find((r) => r.requestId === requestId);
-  if (!req) throw new Error("No pending request with that id in this session.");
-  if (req.channel !== "permission" || req.kind !== "question") {
-    throw new Error(`That request is a ${req.kind ?? req.channel} request, not a question. Answer it in the Videoclaw window.`);
+async function getSpend(sessionId2) {
+  const account = await rpc.first("watchMeter", null).catch(() => null);
+  const out = { account };
+  if (sessionId2) {
+    out.video = await rpc.first("watchSpending", { videoId: sessionId2 });
+    out.videoTotal = await rpc.first("watchVideoTotal", { videoId: sessionId2 }).catch(() => null);
   }
-  const questions = req.questions ?? req.input?.questions ?? [];
-  const flat = {};
-  const selections = {};
-  for (const q of questions) {
-    const given = answers[q.question];
-    if (given === void 0) throw new Error(`Missing an answer for: ${q.question}`);
-    const list = Array.isArray(given) ? given : [given];
-    const labels = new Set((q.options ?? []).map((o) => o.label));
-    const chosen = list.filter((a) => labels.has(a));
-    const other = list.filter((a) => !labels.has(a)).join(", ");
-    flat[q.question] = list.join(", ");
-    selections[q.question] = { chosen, ...other ? { other } : {} };
-  }
-  await app(
-    ({ requestId: requestId2, flat: flat2, selections: selections2 }) => vc.respondPermission(requestId2, { behavior: "answers", answers: flat2, selections: selections2 }),
-    { requestId, flat, selections }
-  );
-  return { answered: true, answers: flat };
+  return out;
 }
-async function respondInput(sessionId2, requestId, response) {
-  const req = (await pendingRequests(sessionId2)).find((r) => r.requestId === requestId);
-  if (!req || req.channel !== "input") throw new Error("No pending file or rights request with that id.");
-  await app(({ requestId: requestId2, response: response2 }) => vc.respondInput(requestId2, response2), { requestId, response });
-  return { responded: true, kind: response.kind };
+var tasteScope = async (clientId2) => clientId2 ? { _tag: "Project", projectId: (await resolveProject(clientId2)).id } : { _tag: "You" };
+async function getTaste(clientId2) {
+  const projectId = clientId2 ? (await resolveProject(clientId2)).id : void 0;
+  const t = await rpc.first("watchTaste", projectId ? { projectId } : {});
+  const layer = (l) => l && { ...l, proposals: l.proposals.map((x) => ({ ...x, quote: opt(x.quote) })) };
+  return { defaults: t.defaults, project: layer(opt(t.project)), you: layer(t.you) };
 }
-function getSpend(sessionId2) {
-  return app(async (sessionId3) => {
-    const [spend, meter] = await Promise.all([
-      sessionId3 ? vc.getSpendSnapshot(sessionId3) : null,
-      vc.keyMeter().catch(() => null)
-    ]);
-    return { video: spend, account: meter };
-  }, sessionId2 ?? null);
+async function addTasteRule(clientId2, text) {
+  await rpc.call("saveCommitment", { scope: await tasteScope(clientId2), text });
+  return { saved: text, scope: clientId2 ? "project" : "you" };
 }
-function stageEtas() {
-  return app(async () => vc.getStageEtas(await workspace()));
+async function decideTasteProposal(clientId2, signal, decision) {
+  await rpc.call("decideProposal", { scope: await tasteScope(clientId2), signal, decision });
+  return { decided: decision };
 }
-async function stageFiles(sessionId2, paths) {
-  const staged = await app(
-    ({ sessionId: sessionId3, files: files2 }) => vc.attachmentStage({ sessionId: sessionId3, destination: "video", files: files2 }),
-    { sessionId: sessionId2, files: paths.map(fileRef) }
-  );
-  const rejected = staged.filter((a) => a.status === "rejected" || a.rejection);
-  if (rejected.length) {
-    throw new Error(`Videoclaw refused: ${rejected.map((a) => `${a.name} (${a.rejection ?? a.status})`).join(", ")}`);
-  }
-  return staged.map((a) => a.id);
+async function listCharacters() {
+  const chars = await rpc.first("watchCharacters", null);
+  return chars.map((c) => ({
+    slug: c.slug,
+    name: c.name,
+    state: c.state,
+    isSelf: c.isSelf,
+    photos: c.photos,
+    sheet: opt(c.sheet) ? characterSheet(c) : null
+  }));
 }
-async function tasteState(clientId2) {
-  return app(async (clientId3) => {
-    const cwd = await workspace();
-    return { cwd, ...await vc.listTaste(clientId3, cwd) };
-  }, clientId2);
+var characterSheet = (c) => join2(WORKSPACE, "characters", c.state === "pending" ? join2("pending", c.slug) : c.slug, "sheet.png");
+async function character(slug2) {
+  const chars = await rpc.first("watchCharacters", null);
+  const c = chars.find((x) => x.slug === slug2 || x.name.toLowerCase() === String(slug2).toLowerCase());
+  if (!c) throw new VideoclawError(`No character matches "${slug2}".`, "CharacterNotFound");
+  return c;
 }
-async function tasteProposals(clientId2) {
-  const t = await tasteState(clientId2);
-  return (t.proposals ?? []).map((p) => ({ id: p.id, rule: p.takeaway, file: p.file, ...p }));
+async function approveCharacter(slug2) {
+  const c = await character(slug2);
+  const sheet = opt(c.sheet);
+  if (!sheet) throw new VideoclawError("That character has no sheet to approve yet.", "NoSheet");
+  await rpc.call("approveCharacter", { slug: c.slug, sheet: sheet.sha256 });
+  return { approved: c.name };
 }
-async function acceptTasteProposal(clientId2, proposalId) {
-  const t = await tasteState(clientId2);
-  const p = (t.proposals ?? []).find((x) => x.id === proposalId);
-  if (!p) throw new Error("No taste proposal with that id for this project.");
-  const scope = t.scopes.find((s) => s.file === p.file);
-  const card = `${p.takeaway} *(${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}, from a repeated pattern)*`;
-  const result = await app(({ cwd, files: files2 }) => vc.commitTaste(cwd, files2), {
-    cwd: t.cwd,
-    files: [{ file: p.file, cards: [...scope?.cards ?? [], card] }]
-  });
-  return { accepted: p.takeaway, file: p.file, result };
-}
-async function declineTasteProposal(clientId2, proposalId) {
-  const t = await tasteState(clientId2);
-  const p = (t.proposals ?? []).find((x) => x.id === proposalId);
-  if (!p) throw new Error("No taste proposal with that id for this project.");
-  const scope = t.scopes.find((s) => s.file === p.file);
-  const antiText = `${p.takeaway} *(declined ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)})*`;
-  const result = await app(({ cwd, file, cards, antiText: antiText2 }) => vc.declineProposal(cwd, file, cards, antiText2), {
-    cwd: t.cwd,
-    file: p.file,
-    cards: scope?.cards ?? [],
-    antiText
-  });
-  return { declined: p.takeaway, result };
-}
-async function addTasteRule(clientId2, rule, layer = "client") {
-  const t = await tasteState(clientId2);
-  const scope = t.scopes.find((s) => s.scope === layer);
-  if (!scope) throw new Error(`No ${layer} taste layer for this project.`);
-  if (scope.readonly) throw new Error("That taste layer is read-only.");
-  const result = await app(({ cwd, files: files2 }) => vc.commitTaste(cwd, files2), {
-    cwd: t.cwd,
-    files: [{ file: scope.file, cards: [...scope.cards, rule] }]
-  });
-  return { added: rule, file: scope.file, result };
-}
-function seedProjectPack(clientId2, brief) {
-  return app(async ({ clientId: clientId3, brief: brief2 }) => vc.seedProjectPack(clientId3, await workspace(), brief2), { clientId: clientId2, brief });
-}
-function getMemory(clientId2) {
-  return app(async (clientId3) => unwrap(await vc.readProjectMemory(await appScope({ clientId: clientId3 }))), clientId2);
-}
-function editMemory(clientId2, entryId, text) {
-  return app(
-    async ({ clientId: clientId3, entryId: entryId2, text: text2 }) => {
-      const scope = await appScope({ clientId: clientId3 });
-      const snap = unwrap(await vc.readProjectMemory(scope));
-      const entry = snap.entries.find((e) => e.id === entryId2);
-      if (!entry) throw new Error("No memory note with that id.");
-      return unwrap(
-        await vc.updateProjectMemory(scope, {
-          action: "save",
-          expectedRevision: snap.revision,
-          entry: { id: entry.id, sources: entry.sources, relatedIds: entry.relatedIds, text: text2 }
-        })
-      );
-    },
-    { clientId: clientId2, entryId, text }
-  );
-}
-function forgetMemory(clientId2, entryId) {
-  return app(
-    async ({ clientId: clientId3, entryId: entryId2 }) => {
-      const scope = await appScope({ clientId: clientId3 });
-      const snap = unwrap(await vc.readProjectMemory(scope));
-      return unwrap(await vc.updateProjectMemory(scope, { action: "forget", expectedRevision: snap.revision, id: entryId2 }));
-    },
-    { clientId: clientId2, entryId }
-  );
-}
-function undoMemory(clientId2, undoId) {
-  return app(
-    async ({ clientId: clientId3, undoId: undoId2 }) => {
-      const scope = await appScope({ clientId: clientId3 });
-      const snap = unwrap(await vc.readProjectMemory(scope));
-      return unwrap(await vc.undoProjectMemory(scope, undoId2, snap.revision));
-    },
-    { clientId: clientId2, undoId }
-  );
-}
-function createClient(name) {
-  return app((name2) => vc.createClient(name2), name);
-}
-async function renameClient(clientId2, name) {
-  const result = await app(({ clientId: clientId3, name: name2 }) => vc.renameClient(clientId3, name2), { clientId: clientId2, name });
-  if (result && "error" in result) throw new Error(result.error);
-  return result;
-}
-function setLibraryId(clientId2, libraryId) {
-  return app(({ clientId: clientId3, libraryId: libraryId2 }) => vc.librarySetTenant(clientId3, libraryId2), { clientId: clientId2, libraryId });
-}
-var libraryReply = (r) => {
-  if (r && r.error) throw new Error(r.error === "no-tenant" ? "This project has no media library yet. Set one with videoclaw_set_library_id." : r.message ?? r.error);
-  return r;
-};
-async function libraryStats(clientId2) {
-  return libraryReply(await app(async (clientId3) => vc.libraryStats(clientId3, await workspace()), clientId2));
-}
-async function libraryScan(clientId2) {
-  return libraryReply(await app(async (clientId3) => vc.libraryScan(clientId3, await workspace()), clientId2));
-}
-async function librarySearch(clientId2, query, type = "video") {
-  return libraryReply(
-    await app(async ({ clientId: clientId3, query: query2, type: type2 }) => vc.librarySearch(clientId3, await workspace(), query2, type2, void 0), {
-      clientId: clientId2,
-      query,
-      type
-    })
-  );
-}
-async function libraryAddFolder(clientId2, folder) {
-  return libraryReply(
-    await app(async ({ clientId: clientId3, folder: folder2 }) => vc.libraryAddSource(clientId3, await workspace(), "all", folder2), { clientId: clientId2, folder })
-  );
-}
-async function librarySync(clientId2) {
-  return libraryReply(await app(async (clientId3) => vc.librarySync(clientId3, await workspace()), clientId2));
-}
-function listCharacters() {
-  return app(
-    async () => (await vc.charactersList(await workspace())).map((c) => ({
-      slug: c.slug,
-      name: c.name,
-      state: c.state,
-      isSelf: c.isSelf,
-      sheetPath: c.sheetPath,
-      refs: c.refs?.length ?? 0
-    }))
-  );
-}
-function createCharacter(name, photos, isSelf = false) {
-  return app(
-    async ({ name: name2, isSelf: isSelf2, photos: photos2 }) => vc.charactersCreate(await workspace(), name2, isSelf2, photos2),
-    { name, isSelf, photos: photos.map(fileRef) }
-  );
-}
-function characterSheetPlan(slug) {
-  return app(async (slug2) => vc.charactersSheetPlan(await workspace(), slug2), slug);
-}
-function buildCharacterSheet(slug) {
-  return app(async (slug2) => vc.charactersSheetBuild(await workspace(), slug2), slug);
-}
-function approveCharacter(slug) {
-  return app(async (slug2) => vc.charactersApprove(await workspace(), slug2), slug);
-}
-async function deleteCharacter(slug) {
-  const removed = await app(async (slug2) => {
-    const cwd = await workspace();
-    const c = (await vc.charactersList(cwd)).find((x) => x.slug === slug2);
-    if (!c) throw new Error("No character with that slug.");
-    return c.state === "pending" ? vc.charactersDiscard(cwd, slug2) : vc.charactersDelete(cwd, slug2);
-  }, slug);
-  if (!removed) throw new Error("Videoclaw kept this character: remove its saved voices first.");
-  return { removed: slug };
-}
-var voiceReply = (r) => {
-  if (r && r.ok === false) throw new Error(r.message ?? "Videoclaw refused that.");
-  return (r?.snapshot?.voices ?? []).map(({ sampleSha256, ...v }) => v);
-};
-async function listVoices(clientId2) {
-  return voiceReply(await app(async (clientId3) => vc.characterVoicesList(await appScope({ clientId: clientId3 })), clientId2));
-}
-function approveVoice(clientId2, voiceId) {
-  return app(
-    async ({ clientId: clientId3, voiceId: voiceId2 }) => {
-      const scope = await appScope({ clientId: clientId3 });
-      const list = await vc.characterVoicesList(scope);
-      const voice = (list?.snapshot?.voices ?? []).find((v) => v.id === voiceId2);
-      if (!voice) throw new Error("No voice with that id in this project.");
-      const reply = await vc.characterVoiceApprove(scope, voiceId2, voice.sampleSha256);
-      if (reply?.ok === false) throw new Error(reply.message ?? "Videoclaw refused that.");
-      return { approved: voiceId2 };
-    },
-    { clientId: clientId2, voiceId }
-  );
-}
-function listTemplates() {
-  return app(async () => {
-    const catalog = await vc.quickstartCatalog();
-    return {
-      catalogSha256: catalog?.catalogSha256,
-      templates: (catalog?.starters ?? catalog?.catalog?.starters ?? []).map((s) => ({
-        id: s.id,
-        title: s.title ?? s.name,
-        description: s.description ?? s.summary,
-        category: s.category
-      }))
-    };
-  });
-}
-function startTemplate(clientId2, starterId) {
-  return app(
-    async ({ clientId: clientId3, starterId: starterId2, journeyId, activationId }) => {
-      const catalog = await vc.quickstartCatalog();
-      const result = await vc.quickstartStart({
-        starterId: starterId2,
-        clientId: clientId3,
-        catalogSha256: catalog.catalogSha256,
-        entryPoint: "project-starter",
-        journeyId,
-        activationId
-      });
-      return result.session;
-    },
-    { clientId: clientId2, starterId, journeyId: randomUUID2(), activationId: randomUUID2() }
-  );
+async function deleteCharacter(slug2) {
+  const c = await character(slug2);
+  await rpc.call(c.state === "pending" ? "discardCharacter" : "deleteCharacter", { slug: c.slug });
+  return { deleted: c.name };
 }
 
 // src/mcp.mjs
-var server = new McpServer({ name: "videoclaw", version: "0.3.1" });
+var server = new McpServer({ name: "videoclaw", version: "0.4.0" });
 var ok = (value) => ({ content: [{ type: "text", text: JSON.stringify(value ?? { done: true }, null, 2) }] });
 var tool = (name, description, schema, run) => server.tool(name, description, schema, async (args) => {
   try {
@@ -22250,9 +22342,10 @@ var tool = (name, description, schema, run) => server.tool(name, description, sc
     return { isError: true, content: [{ type: "text", text: err.message }] };
   }
 });
-var sessionId = external_exports.string().describe("Videoclaw session id");
-var clientId = external_exports.string().describe("Videoclaw client/project id (see videoclaw_list_clients)");
+var sessionId = external_exports.string().describe("Videoclaw video id (sessionId from videoclaw_list_sessions)");
+var clientId = external_exports.string().describe('Videoclaw project: its id, or its name such as "Hover" (see videoclaw_list_clients)');
 var files = external_exports.array(external_exports.string()).optional().describe("Absolute paths of local files to attach (footage, stills, audio, briefs)");
+var NEXT_STEP = "Videoclaw turns can take many minutes. Call videoclaw_check_progress with this sessionId to wait for and read the reply; if it is still running, tell the user it's in progress and check again later.";
 tool(
   "videoclaw_launch",
   "Start Videoclaw with its DevTools port open. Other tools do this automatically; use restart=true only when the user agrees, because it interrupts a running job.",
@@ -22261,110 +22354,82 @@ tool(
 );
 tool(
   "videoclaw_list_clients",
-  "List Videoclaw clients/projects (use clientId when creating a session).",
+  "List Videoclaw projects (clients). A project decides which taste rules apply to its videos.",
   {},
   () => listClients()
 );
 tool(
   "videoclaw_list_sessions",
-  "List Videoclaw chat sessions with status, client and title.",
-  {},
-  () => listSessions()
+  "List Videoclaw videos (chat sessions) with title, project and status (needsYou, working, done, idle).",
+  { clientId: clientId.optional() },
+  ({ clientId: clientId2 }) => listSessions({ clientId: clientId2 })
 );
-var NEXT_STEP = "Videoclaw turns can take many minutes. Call videoclaw_check_progress with this sessionId to wait for and read the reply; if it is still running, tell the user it's in progress and check again later.";
-async function sendWithFiles(id, message, paths) {
-  const attachmentIds = paths?.length ? await stageFiles(id, paths) : [];
-  await send(id, message, { wait: false, attachmentIds });
-  return attachmentIds.length;
-}
 tool(
   "videoclaw_create_session",
-  "Create a new Videoclaw chat session, optionally under a client (the project; it decides which taste pack and media library apply), and optionally send a first message with attached files. Returns immediately; use videoclaw_check_progress to get the reply.",
-  { clientId: clientId.optional(), message: external_exports.string().optional(), files },
-  async ({ clientId: clientId2, message, files: files2 }) => {
-    const session = await createSession({ clientId: clientId2 });
+  "Create a new Videoclaw video under a project, and optionally send the first message (the brief) with attached files. Returns immediately; use videoclaw_check_progress to get the reply.",
+  { clientId: clientId.optional(), title: external_exports.string().optional(), message: external_exports.string().optional(), files },
+  async ({ clientId: clientId2, title, message, files: files2 }) => {
+    const session = await createSession({ clientId: clientId2, title });
     if (!message) return { session };
-    const attached = await sendWithFiles(session.sessionId, message, files2);
-    return { session, sent: true, attached, next: NEXT_STEP };
+    const sent = await send(session.sessionId, message, { files: files2 });
+    return { session, ...sent, next: NEXT_STEP };
   }
 );
 tool(
   "videoclaw_send_message",
-  "Send a message to a Videoclaw session (a brief, a reply, or a go-ahead), optionally with attached files. Returns as soon as Videoclaw accepts it; it does NOT wait for the reply. Then call videoclaw_check_progress.",
+  "Send a message to a Videoclaw video (a brief, feedback, or a go-ahead), optionally with attached files. Returns as soon as Videoclaw accepts it; it does NOT wait for the reply. If Videoclaw is still working, the message is queued and sent when the current turn ends. Then call videoclaw_check_progress.",
   { sessionId, message: external_exports.string(), files },
-  async ({ sessionId: sessionId2, message, files: files2 }) => {
-    const attached = await sendWithFiles(sessionId2, message, files2);
-    return { sessionId: sessionId2, sent: true, attached, next: NEXT_STEP };
-  }
+  async ({ sessionId: sessionId2, message, files: files2 }) => ({ sessionId: sessionId2, ...await send(sessionId2, message, { files: files2 }), next: NEXT_STEP })
 );
 tool(
   "videoclaw_check_progress",
-  "Wait up to waitMinutes (default 4, max 5) for a Videoclaw session's current turn to finish, then return its status (running/idle/error), the assistant's reply so far, anything waiting on the user, and current renders. While running it also returns typical stage durations. If done=false, report progress and call again later rather than looping for a long time. If waitingOnUser lists a question, use videoclaw_get_pending and videoclaw_answer_question.",
+  "Wait up to waitMinutes (default 4, max 5) for a video's current turn to finish or to need the user, then return its status (running/idle/error), the reply so far, the tools it used, anything waiting on the user, and the latest and final versions. If done=false, report progress and check again later rather than looping for a long time. If waitingOnUser is not empty, see videoclaw_get_pending.",
   { sessionId, waitMinutes: external_exports.number().min(0).max(5).optional() },
-  async ({ sessionId: sessionId2, waitMinutes = 4 }) => {
-    const progress = await checkProgress(sessionId2, { waitMs: waitMinutes * 6e4 });
-    if (progress.done) return progress;
-    return { ...progress, typicalStageTimes: await stageEtas().catch(() => void 0) };
-  }
+  ({ sessionId: sessionId2, waitMinutes = 4 }) => checkProgress(sessionId2, { waitMs: waitMinutes * 6e4 })
 );
 tool(
   "videoclaw_get_history",
-  "Read a Videoclaw session's transcript (user, assistant, tool and error entries).",
-  { sessionId },
-  ({ sessionId: sessionId2 }) => transcript(sessionId2)
+  "Read a video's recent chat: user and assistant messages and notices (and tool steps with includeTools).",
+  { sessionId, limit: external_exports.number().int().positive().max(200).optional(), includeTools: external_exports.boolean().optional() },
+  ({ sessionId: sessionId2, limit, includeTools }) => history(sessionId2, { limit, tools: includeTools })
 );
 tool(
   "videoclaw_get_job",
-  "Get the artifacts a session produced: its job folder, numbered versions (with approval state and the user's feedback), renders (newest first) and other outputs (stills, audio, approval sheets) as absolute local paths you can open or read.",
-  { sessionId },
-  ({ sessionId: sessionId2 }) => getJob(sessionId2)
+  "Get what a video produced: its job folder, numbered versions (V1, V2\u2026, with the final marked) and other outputs (stills, audio, clips, newest first) as absolute local paths you can open.",
+  { sessionId, all: external_exports.boolean().optional().describe("List every output, not only the newest 30") },
+  ({ sessionId: sessionId2, all }) => getJob(sessionId2, { all })
+);
+tool("videoclaw_interrupt", "Stop the running turn on a Videoclaw video.", { sessionId }, async ({ sessionId: sessionId2 }) => {
+  await interrupt(sessionId2);
+  return { interrupted: true };
+});
+tool(
+  "videoclaw_rename_session",
+  "Rename a Videoclaw video.",
+  { sessionId, title: external_exports.string() },
+  ({ sessionId: sessionId2, title }) => renameSession(sessionId2, title)
 );
 tool(
-  "videoclaw_interrupt",
-  "Stop the running turn in a Videoclaw session.",
-  { sessionId },
-  ({ sessionId: sessionId2 }) => interrupt(sessionId2).then(() => ({ interrupted: true }))
-);
-tool(
-  "videoclaw_get_plan",
-  "Read the session's plan card (Videoclaw's proposal before it builds): title, text, format, shots, budget and phase. phase 'awaiting-decision' means it waits for videoclaw_choose_plan.",
-  { sessionId },
-  ({ sessionId: sessionId2 }) => getPlan(sessionId2)
-);
-tool(
-  "videoclaw_choose_plan",
-  "Press a plan button, exactly like the app: 'build' (start the full build), 'preview' (cheap preview first), 'change' (revise the plan; requires correction text) or 'dismiss'. Show the plan to the user and only choose build or preview when they approve it. Building may spend credits within the app's budget rules.",
+  "videoclaw_set_agent_settings",
+  "Change the model, effort, mode or fast setting of a video's agent. Omitted fields keep their value. mode 'plan' makes Videoclaw plan before it builds; 'ask' asks before each action. Only change these when the user asks.",
   {
     sessionId,
-    action: external_exports.enum(["build", "preview", "change", "dismiss"]),
-    correction: external_exports.string().optional().describe("What to change; required for action 'change'")
+    model: external_exports.string().optional().describe("For example claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5"),
+    effort: external_exports.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    mode: external_exports.enum(["auto", "ask", "acceptEdits", "plan", "bypass"]).optional(),
+    fast: external_exports.boolean().optional()
   },
-  ({ sessionId: sessionId2, action, correction }) => {
-    if (action === "change" && !correction) throw new Error("Give correction text for 'change'.");
-    return choosePlan(sessionId2, action, correction);
-  }
+  ({ sessionId: sessionId2, ...changes }) => setAgentSettings(sessionId2, changes)
 );
 tool(
   "videoclaw_approve_version",
-  "Approve a numbered version (V1, V2\u2026) as the final video for the session.",
+  "Mark a numbered version (V1, V2\u2026) as the final video. Only when the user approves it.",
   { sessionId, version: external_exports.number().int().positive() },
   ({ sessionId: sessionId2, version: version2 }) => approveVersion(sessionId2, version2)
 );
 tool(
-  "videoclaw_revert_final",
-  "Make an earlier version the final one instead.",
-  { sessionId, version: external_exports.number().int().positive() },
-  ({ sessionId: sessionId2, version: version2 }) => revertFinal(sessionId2, version2)
-);
-tool(
-  "videoclaw_reopen",
-  "Reopen a finished (approved) video so it can be edited again.",
-  { sessionId },
-  ({ sessionId: sessionId2 }) => reopenSession(sessionId2)
-);
-tool(
   "videoclaw_share",
-  "Upload a finished version and return a share link anyone can open (for example to post to a client). Defaults to the approved final, else the newest version. Only share when the user asks for a link.",
+  "Upload a version and return a share link anyone can open (for example to send to a client). Defaults to the final version, else the newest. Only share when the user asks for a link.",
   {
     sessionId,
     version: external_exports.number().int().positive().optional().describe("Version number from videoclaw_get_job"),
@@ -22374,7 +22439,7 @@ tool(
 );
 tool(
   "videoclaw_list_shares",
-  "List share links, for one session or all sessions.",
+  "List share links (status active, unresolved, expired or stopped), for one video or all.",
   { sessionId: sessionId.optional() },
   ({ sessionId: sessionId2 }) => shareList(sessionId2)
 );
@@ -22382,200 +22447,88 @@ tool(
   "videoclaw_revoke_share",
   "Stop a share link; it stops working immediately.",
   { shareId: external_exports.string() },
-  ({ shareId }) => shareRevoke(shareId).then(() => ({ revoked: shareId }))
+  ({ shareId }) => shareRevoke(shareId)
 );
 tool(
   "videoclaw_get_pending",
-  "List what Videoclaw is waiting on: question cards (with their questions and options), file and rights requests, and spend or permission approvals. Spend/permission approvals can only be answered in the Videoclaw window.",
+  "List what Videoclaw is waiting on: question cards (with questions and options), file, rights and voiceover requests, and spend or permission approvals. Spend and permission approvals can only be answered in the Videoclaw window. Without sessionId, checks every video that needs you.",
   { sessionId: sessionId.optional() },
-  ({ sessionId: sessionId2 }) => pendingRequests(sessionId2)
+  ({ sessionId: sessionId2 }) => pending(sessionId2)
 );
 tool(
   "videoclaw_answer_question",
-  "Answer a question card from videoclaw_get_pending. answers maps each question's exact text to an option label, several labels, or free text. Ask the user unless they already gave the answer.",
+  'Answer an open question card. Show the questions and options to the user first. `answers` maps each question (its id such as "q0", or its text) to the chosen option label, or a list of labels for multi-select. Text that is not an option is sent as a free-form answer.',
   {
     sessionId,
-    requestId: external_exports.string(),
+    itemId: external_exports.string().describe("itemId from videoclaw_get_pending"),
     answers: external_exports.record(external_exports.string(), external_exports.union([external_exports.string(), external_exports.array(external_exports.string())]))
   },
-  ({ sessionId: sessionId2, requestId, answers }) => answerQuestion(sessionId2, requestId, answers)
+  ({ sessionId: sessionId2, itemId, answers }) => answerQuestion(sessionId2, itemId, answers)
 );
 tool(
   "videoclaw_respond_request",
-  "Answer a file or rights request from videoclaw_get_pending: 'files' with absolute paths, 'rights' to confirm the user holds the rights (only when the user explicitly confirmed it), or 'cancel' to decline.",
+  "Answer an open file, rights or voiceover request. kind 'files' uploads `paths`; 'rights' with accepted=true confirms the user holds the rights (only when the user says so); 'voiceover' with accepted=true keeps the take; 'decline' declines. Spend and permission approvals stay in the app.",
   {
     sessionId,
-    requestId: external_exports.string(),
-    kind: external_exports.enum(["files", "rights", "cancel"]),
-    paths: external_exports.array(external_exports.string()).optional(),
-    reason: external_exports.string().optional()
+    itemId: external_exports.string().describe("itemId from videoclaw_get_pending"),
+    kind: external_exports.enum(["files", "rights", "voiceover", "decline"]),
+    paths: external_exports.array(external_exports.string()).optional().describe("Absolute file paths, for kind 'files'"),
+    accepted: external_exports.boolean().optional()
   },
-  ({ sessionId: sessionId2, requestId, kind, paths, reason }) => {
-    const response = kind === "files" ? { kind, paths: paths ?? [] } : kind === "rights" ? { kind, accepted: true } : { kind, reason: reason ?? "Declined" };
-    if (kind === "files" && !paths?.length) throw new Error("Give paths for 'files'.");
-    return respondInput(sessionId2, requestId, response);
-  }
+  ({ sessionId: sessionId2, itemId, ...answer }) => respondRequest(sessionId2, itemId, answer)
 );
 tool(
   "videoclaw_get_spend",
-  "Show a video's spend and reserved budget, and the account's credit balance. Read-only.",
+  "Show spend: the account's credit, and with sessionId the video's budget, limit and what it has spent.",
   { sessionId: sessionId.optional() },
   ({ sessionId: sessionId2 }) => getSpend(sessionId2)
 );
 tool(
   "videoclaw_get_taste",
-  "Show the taste layers Videoclaw applies to a client/project: engine defaults, the user's global taste, and the project pack, with whether each file exists and its contents.",
-  { clientId },
+  "Show the taste rules Videoclaw applies: built-in defaults, the user's own rules (you) and the project's rules, each with commitments, noes and proposals (rules Videoclaw suggests from feedback).",
+  { clientId: clientId.optional() },
   ({ clientId: clientId2 }) => getTaste(clientId2)
 );
 tool(
-  "videoclaw_list_taste_proposals",
-  "List taste rules Videoclaw proposes saving for a project (patterns it noticed in feedback).",
-  { clientId },
-  ({ clientId: clientId2 }) => tasteProposals(clientId2)
+  "videoclaw_add_taste_rule",
+  "Save a taste rule the user states. With clientId it applies to that project; without, to all the user's videos.",
+  { rule: external_exports.string(), clientId: clientId.optional() },
+  ({ rule, clientId: clientId2 }) => addTasteRule(clientId2, rule)
 );
 tool(
   "videoclaw_decide_taste_proposal",
-  "Accept a proposed taste rule (saved and applied to future videos) or decline it (Videoclaw won't raise it again). Ask the user first.",
-  { clientId, proposalId: external_exports.string(), decision: external_exports.enum(["accept", "decline"]) },
-  ({ clientId: clientId2, proposalId, decision }) => decision === "accept" ? acceptTasteProposal(clientId2, proposalId) : declineTasteProposal(clientId2, proposalId)
-);
-tool(
-  "videoclaw_add_taste_rule",
-  "Add a taste rule the user stated. layer 'client' applies to this project only; 'global' applies to all the user's projects.",
-  { clientId, rule: external_exports.string(), layer: external_exports.enum(["client", "global"]).optional() },
-  ({ clientId: clientId2, rule, layer }) => addTasteRule(clientId2, rule, layer ?? "client")
-);
-tool(
-  "videoclaw_seed_taste_pack",
-  "Create a project's taste pack from a short brief about the brand or creator (what Videoclaw's project starter does).",
-  { clientId, brief: external_exports.string() },
-  ({ clientId: clientId2, brief }) => seedProjectPack(clientId2, brief)
-);
-tool(
-  "videoclaw_get_memory",
-  "Read the notes Videoclaw remembers about a project (preferences, decisions), with their sources. To add a note, tell Videoclaw in a session to remember it.",
-  { clientId },
-  ({ clientId: clientId2 }) => getMemory(clientId2)
-);
-tool(
-  "videoclaw_edit_memory",
-  "Rewrite the text of an existing project-memory note (its sources are kept).",
-  { clientId, entryId: external_exports.string(), text: external_exports.string() },
-  ({ clientId: clientId2, entryId, text }) => editMemory(clientId2, entryId, text)
-);
-tool(
-  "videoclaw_forget_memory",
-  "Remove a project-memory note. The reply includes an undo id for videoclaw_undo_memory.",
-  { clientId, entryId: external_exports.string() },
-  ({ clientId: clientId2, entryId }) => forgetMemory(clientId2, entryId)
-);
-tool(
-  "videoclaw_undo_memory",
-  "Undo a project-memory edit or removal.",
-  { clientId, undoId: external_exports.string() },
-  ({ clientId: clientId2, undoId }) => undoMemory(clientId2, undoId)
+  "Accept or decline a taste proposal from videoclaw_get_taste. Ask the user for each one. Pass the proposal's `signal`, and the clientId when it is a project proposal.",
+  { signal: external_exports.string(), decision: external_exports.enum(["accept", "decline"]), clientId: clientId.optional() },
+  ({ signal, decision, clientId: clientId2 }) => decideTasteProposal(clientId2, signal, decision)
 );
 tool(
   "videoclaw_create_client",
-  "Create a new client/project.",
+  "Create a Videoclaw project.",
   { name: external_exports.string() },
   ({ name }) => createClient(name)
 );
 tool(
   "videoclaw_rename_client",
-  "Rename a client/project.",
+  "Rename a Videoclaw project.",
   { clientId, name: external_exports.string() },
   ({ clientId: clientId2, name }) => renameClient(clientId2, name)
 );
 tool(
-  "videoclaw_set_library_id",
-  "Set the id a project uses for its media library and taste pack folder (assets/<id>, taste/packs/<id>). Changing it points the project at a different library; ask the user first.",
-  { clientId, libraryId: external_exports.string() },
-  ({ clientId: clientId2, libraryId }) => setLibraryId(clientId2, libraryId)
-);
-tool(
-  "videoclaw_library_stats",
-  "Show a project's media library: indexed videos and images, and its source folders.",
-  { clientId },
-  ({ clientId: clientId2 }) => libraryStats(clientId2)
-);
-tool(
-  "videoclaw_library_scan",
-  "Check a project's source folders for media not yet indexed. Free.",
-  { clientId },
-  ({ clientId: clientId2 }) => libraryScan(clientId2)
-);
-tool(
-  "videoclaw_library_search",
-  "Search a project's indexed footage or stills in plain words (for example 'dark mode home screen').",
-  { clientId, query: external_exports.string(), type: external_exports.enum(["video", "image"]).optional() },
-  ({ clientId: clientId2, query, type }) => librarySearch(clientId2, query, type ?? "video")
-);
-tool(
-  "videoclaw_library_add_folder",
-  "Add a local folder of footage or stills to a project's library. Then run videoclaw_library_sync to index it.",
-  { clientId, folder: external_exports.string().describe("Absolute folder path") },
-  ({ clientId: clientId2, folder }) => libraryAddFolder(clientId2, folder)
-);
-tool(
-  "videoclaw_library_sync",
-  "Index new media in a project's library so it becomes searchable. This uses a paid embedding model; check videoclaw_library_scan first and ask the user before syncing many files.",
-  { clientId },
-  ({ clientId: clientId2 }) => librarySync(clientId2)
-);
-tool(
   "videoclaw_list_characters",
-  "List saved characters (people Videoclaw can put in videos), with state and sheet path.",
+  "List saved characters (people Videoclaw can put in videos) with their state and sheet image. To use one in a video, name it in the message. To make a new one, ask Videoclaw in a video's chat.",
   {},
   () => listCharacters()
 );
 tool(
-  "videoclaw_create_character",
-  "Create a character from reference photos (pending until its sheet is built and approved). isSelf marks the user's own character.",
-  { name: external_exports.string(), photos: external_exports.array(external_exports.string()).min(1), isSelf: external_exports.boolean().optional() },
-  ({ name, photos, isSelf }) => createCharacter(name, photos, isSelf ?? false)
-);
-tool(
-  "videoclaw_build_character_sheet",
-  "Build a pending character's reference sheet. confirm=false (default) only returns what it involves and costs; confirm=true starts the paid build. Ask the user before confirming.",
-  { slug: external_exports.string(), confirm: external_exports.boolean().optional() },
-  ({ slug, confirm }) => confirm ? buildCharacterSheet(slug) : characterSheetPlan(slug)
-);
-tool(
   "videoclaw_approve_character",
-  "Approve a character's built sheet so it can be used in videos. Look at the sheet image first.",
-  { slug: external_exports.string() },
-  ({ slug }) => approveCharacter(slug)
+  "Approve a pending character's sheet. Look at the sheet image with the user first.",
+  { slug: external_exports.string().describe("Character slug or name") },
+  ({ slug: slug2 }) => approveCharacter(slug2)
 );
 tool(
   "videoclaw_delete_character",
-  "Delete a character (or discard a pending one). Ask the user first.",
-  { slug: external_exports.string() },
-  ({ slug }) => deleteCharacter(slug)
-);
-tool(
-  "videoclaw_list_voices",
-  "List saved character voices for a project.",
-  { clientId },
-  ({ clientId: clientId2 }) => listVoices(clientId2)
-);
-tool(
-  "videoclaw_approve_voice",
-  "Approve a saved character voice for a project after the user has listened to it.",
-  { clientId, voiceId: external_exports.string() },
-  ({ clientId: clientId2, voiceId }) => approveVoice(clientId2, voiceId)
-);
-tool(
-  "videoclaw_list_templates",
-  "List Videoclaw's starter templates (Quickstarts).",
-  {},
-  () => listTemplates()
-);
-tool(
-  "videoclaw_start_template",
-  "Start a new video session from a template under a client. Returns the new session; then use videoclaw_check_progress.",
-  { clientId, templateId: external_exports.string().describe("Template id from videoclaw_list_templates") },
-  ({ clientId: clientId2, templateId }) => startTemplate(clientId2, templateId)
+  "Delete a character (or discard a pending one). Only when the user asks.",
+  { slug: external_exports.string().describe("Character slug or name") },
+  ({ slug: slug2 }) => deleteCharacter(slug2)
 );
 await server.connect(new StdioServerTransport());
